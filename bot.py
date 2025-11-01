@@ -303,14 +303,17 @@ async def start(message: types.Message):
     ensure_user(uid, uname)
     save_progress(progress)
 
-    kb = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⏭ Начать", callback_data="next"))
-    await message.answer(
-        f"👋 Привет, {uname}!\n\n"
-        "Этот бот учит педиатрию с интервальным повторением.\n\n"
-        "💡 Ошибки — завтра, верные — через 2, 4, 8… дней.\n\n"
-        f"📚 Вопросов: {TOTAL_QUESTIONS} | NEJM: {TOTAL_NEJM} | Practicum: {TOTAL_PRACTICUM}\n\n"
-        "Смотри /help.",
-        reply_markup=kb
+kb = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⏭ Начать", callback_data="next"))
+await message.answer(
+    f"👋 Привет, {uname}!\n\n"
+    "Этот бот учит педиатрию с интервальным повторением.\n\n"
+    "💡 Ошибки - завтра, верные - через 2, 4, 8... дней.\n\n"
+    "📚 Разделы:\n"
+    f"🧠 PediaMed - {TOTAL_QUESTIONS}\n"
+    f"🩺 NEJM - {TOTAL_NEJM}\n"
+    f"🛠 PediaPracticum - {TOTAL_PRACTICUM}\n\n"
+    "Смотри /help.",
+    reply_markup=kb
     )
 
 @dp.message_handler(commands=["help"])
