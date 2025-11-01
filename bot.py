@@ -303,35 +303,17 @@ async def start(message: types.Message):
     ensure_user(uid, uname)
     save_progress(progress)
 
-kb = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⏭ Начать", callback_data="next"))
-await message.answer(
-    f"👋 Привет, {uname}!\n\n"
-    "Этот бот учит педиатрию с интервальным повторением.\n\n"
-    "💡 Ошибки - завтра, верные - через 2, 4, 8... дней.\n\n"
-    "📚 Разделы:\n"
-    f"🧠 PediaMed - {TOTAL_QUESTIONS}\n"
-    f"🩺 NEJM - {TOTAL_NEJM}\n"
-    f"🛠 PediaPracticum - {TOTAL_PRACTICUM}\n\n"
-    "Смотри /help.",
-    reply_markup=kb
-    )
-
-@dp.message_handler(commands=["help"])
-async def help_cmd(message: types.Message):
+    kb = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⏭ Начать", callback_data="next"))
     await message.answer(
-        "🧭 Команды:\n"
-        "/train — выбрать тему\n"
-        "/review — повтор карточек на сегодня\n"
-        "/stats — статистика и прогресс\n"
-        "/achievements — твои достижения и токены\n"
-        "/top_done — топ по количеству ответов\n"
-        "/top_streak — топ по стрику\n"
-        "/goal N — цель на день\n"
-        "/reset_topic — сброс по теме\n"
-        "/reset — полный сброс\n"
-        "/users — количество пользователей (админ)\n"
-        "/nejm — клинические кейсы NEJM (с картинками, без подписей)\n"
-        "/practicum — карточки-памятки\n"
+        f"👋 Привет, {uname}!\n\n"
+        "Этот бот учит педиатрию с интервальным повторением.\n\n"
+        "💡 Ошибки - завтра, верные - через 2, 4, 8... дней.\n\n"
+        "📚 Разделы:\n"
+        f"🧠 PediaMed - {TOTAL_QUESTIONS}\n"
+        f"🩺 NEJM - {TOTAL_NEJM}\n"
+        f"🛠 PediaPracticum - {TOTAL_PRACTICUM}\n\n"
+        "Смотри /help.",
+        reply_markup=kb
     )
 
 @dp.message_handler(commands=["goal"])
