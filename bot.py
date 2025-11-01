@@ -1,34 +1,46 @@
 from aiogram import Bot, Dispatcher, executor, types
 from aiogram.types import InputFile
 import json, random, os, asyncio
-from typing import Optional, List, Tuple
+from typing import Optional
 from datetime import datetime, timedelta
 from pathlib import Path
 
 # ======================
 # НАСТРОЙКА
 # ======================
-BOT_TOKEN = "8242848619:AAF-hYX8z1oWNrNLqgvqEKGefBaJtZ7qB0I"
+BOT_TOKEN = "8242848619:AAF-hYX8z1oWNrNLqgvqEKGefBaJtZ7qB0I"  # твой токен
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
 
-PROGRESS_FILE = "progress.json"
+BASE_DIR = Path(__file__).resolve().parent
+PROGRESS_FILE = str(BASE_DIR / "progress.json")
+NEJM_FILE = BASE_DIR / "nejm_cases.json"
+PRACTICUM_FILE = BASE_DIR / "practicum.json"
+QUESTIONS_FILE = BASE_DIR / "questions.json"
+
 DATE_FMT = "%Y-%m-%d"
 ADMIN_ID = 288158839  # твой chat_id
-BASE_DIR = Path(__file__).resolve().parent
 
-# Поддержим оба имени файла на всякий случай
-NEJM_FILE_MAIN = BASE_DIR / "nejm_cases.json"
-NEJM_FILE_ALT  = BASE_DIR / "nejm.cases.json"
-PRACTICUM_FILE = BASE_DIR / "practicum.json"
+# Достижения за стрик (дни подряд)
+ACHIEVEMENT_MILESTONES = [
+    (1,  "🎈 Первый шаг"),
+    (3,  "🔥 Разогрев"),
+    (7,  "🏅 Неутомимый педиатр"),
+    (14, "👑 Король отделения"),
+    (30, "💎 Стальной клиницист"),
+    (60, "🚀 Машина знаний"),
+    (100,"🌟 Легенда поликлиники"),
+    (180,"🏆 Хардмод-пример"),
+    (365,"🎖️ Год без пропусков"),
+]
 
 # ======================
 # УТИЛИТЫ
 # ======================
-def today_str() -> str:
+def today_str():
     return datetime.now().strftime(DATE_FMT)
 
-def is_due(date_str: str) -> bool:
+def is_due(date_str: str):
     if not date_str:
         return False
     try:
@@ -37,48 +49,46 @@ def is_due(date_str: str) -> bool:
         return False
     return datetime.now().date() >= d
 
-def load_progress() -> dict:
-    if os.path.exists(PROGRESS_FILE):
-        with open(PROGRESS_FILE, encoding="utf-8") as f:
-            return json.load(f)
-    return {}
+def load_json(path: Path, default):
+    if path.exists():
+        with path.open(encoding="utf-8") as f:
+            try:
+                return json.load(f)
+            except Exception:
+                pass
+    return default
 
-def save_progress(progress: dict) -> None:
+def save_progress(progress):
     with open(PROGRESS_FILE, "w", encoding="utf-8") as f:
         json.dump(progress, f, ensure_ascii=False, indent=2)
 
-def split_text(text: str, limit: int = 3500) -> List[str]:
-    return [text[i:i+limit] for i in range(0, len(text), limit)]
+def split_text(text, limit=3500):
+    return [text[i:i + limit] for i in range(0, len(text), limit)]
 
-def load_json(path: Path) -> list:
-    if path.exists():
-        try:
-            with path.open(encoding="utf-8") as fh:
-                return json.load(fh)
-        except Exception:
-            print(f"⚠️ Не удалось прочитать {path.name}")
-    return []
-
-def gather_question_images(q: dict) -> List[Tuple[str, Optional[str]]]:
+def gather_question_images(q: dict):
     seen = set()
-    entries: List[Tuple[str, Optional[str]]] = []
+    entries = []
     # primary
-    prim = q.get("image")
-    if isinstance(prim, str) and prim.strip():
-        entries.append((prim.strip(), q.get("image_caption")))
-        seen.add(prim.strip())
-    # list forms
+    primary = q.get("image")
+    if isinstance(primary, str) and primary.strip():
+        p = primary.strip()
+        if p not in seen:
+            entries.append((p, q.get("image_caption")))
+            seen.add(p)
+    # array
     imgs = q.get("images")
     if isinstance(imgs, list):
         caps = q.get("image_captions") if isinstance(q.get("image_captions"), list) else None
-        for i, item in enumerate(imgs):
-            path, cap = None, None
-            if isinstance(item, str):
-                path = item.strip()
-                cap = (caps[i] if (caps and i < len(caps)) else None)
-            elif isinstance(item, dict):
+        for idx, item in enumerate(imgs):
+            cap = None
+            path = None
+            if isinstance(item, dict):
                 path = item.get("path") or item.get("url") or item.get("image")
-                cap  = item.get("caption")
+                cap = item.get("caption")
+            elif isinstance(item, str):
+                path = item
+                if caps and idx < len(caps):
+                    cap = caps[idx]
             if path and path not in seen:
                 entries.append((path, cap))
                 seen.add(path)
@@ -87,30 +97,23 @@ def gather_question_images(q: dict) -> List[Tuple[str, Optional[str]]]:
 def resolve_image_source(source: str):
     if not source:
         return None
-    s = str(source)
-    if s.startswith(("http://","https://")):
-        return s
-    local = (BASE_DIR / s).resolve()
-    if local.exists():
-        return InputFile(str(local))
-    return s
+    source_str = str(source)
+    if source_str.startswith(("http://", "https://")):
+        return source_str
+    local_path = (BASE_DIR / source_str).resolve()
+    if local_path.exists():
+        return InputFile(str(local_path))
+    return source_str
 
 # ======================
 # ДАННЫЕ
 # ======================
-progress = load_progress()
+progress = load_json(Path(PROGRESS_FILE), {})
+questions = load_json(QUESTIONS_FILE, [])
+nejm_cases = load_json(NEJM_FILE, [])
+practicum_cards = load_json(PRACTICUM_FILE, [])
 
-with open("questions.json", encoding="utf-8") as f:
-    questions = json.load(f)
-
-# NEJM: поддержим оба имени
-nejm_cases = load_json(NEJM_FILE_MAIN)
-if not nejm_cases:
-    nejm_cases = load_json(NEJM_FILE_ALT)
-
-practicum_cards = load_json(PRACTICUM_FILE)
-
-Q_BY_ID = {int(q["id"]): q for q in questions}
+Q_BY_ID = {int(q["id"]): q for q in questions if "id" in q}
 TOPICS = sorted(set(q.get("topic", "Без темы") for q in questions))
 TOPIC_MAP = {i: t for i, t in enumerate(TOPICS)}
 TOTAL_QUESTIONS = len(questions)
@@ -118,59 +121,36 @@ TOTAL_NEJM = len(nejm_cases)
 TOTAL_PRACTICUM = len(practicum_cards)
 
 # ======================
-# ДОСТИЖЕНИЯ (как раньше + формулировки)
+# ПРОГРЕСС ПОЛЬЗОВАТЕЛЯ
 # ======================
-# По streak (серия дней достижения дневной цели)
-ACHIEVEMENTS_STREAK = [
-    (1,   "Первый шаг",              "🟢"),
-    (3,   "Разогреваемся",          "🔥"),
-    (7,   "Непотушимый педиатр",    "💪"),
-    (14,  "Сила привычки",          "🧠"),
-    (30,  "Месяц стабильности",     "📅"),
-    (60,  "Железная дисциплина",    "🧲"),
-    (100, "Столетник",              "🏅"),
-    (180, "Полугодовой марафон",    "🎽"),
-    (365, "Король отделения",       "👑"),
-]
-
-# По общему количеству ответов
-ACHIEVEMENTS_DONE = [
-    (50,   "50 ответов — старт дан",         "🏁"),
-    (100,  "100 ответов — уверенно идёшь",   "🚀"),
-    (250,  "250 ответов — хороший тонус",    "⚙️"),
-    (500,  "500 ответов — мастер практики",  "🛠"),
-    (1000, "1000 ответов — легенда",         "🌟"),
-]
-
-def ensure_user(uid: str, name_hint="Без имени") -> dict:
+def get_user(uid: str, name_hint="Без имени"):
     u = progress.setdefault(uid, {
         "name": name_hint,
-        "cards": {},
-        "topics": {},
-        "streak": 0,
-        "last_goal_day": None,
-        "last_review": None,
+        "cards": {},              # {qid: {interval, next_review}}
+        "topics": {},             # {topic: {correct,total}}
+        "streak": 0,              # дни подряд
+        "last_goal_day": None,    # когда цель достигнута
+        "last_review": None,      # последний день занятия
         "goal_per_day": 10,
         "done_today": 0,
         "last_day": today_str(),
-        "total_answers": 0,
-        "achievements": [],  # список ключей "streak:7" или "done:100"
+        "achievements": [],       # список названий достижений
         "nejm": {"queue": [], "answered": 0, "current": None},
         "practicum": {"index": 0},
+        "done_total": 0           # всего отвечено карточек
     })
-    # смена дня
+    # новый день — обнулить done_today
     if u.get("last_day") != today_str():
         u["done_today"] = 0
         u["last_day"] = today_str()
-    # страховки
-    u.setdefault("total_answers", 0)
+    # защита от отсутствующих ключей
     u.setdefault("achievements", [])
     u.setdefault("nejm", {"queue": [], "answered": 0, "current": None})
     u.setdefault("practicum", {"index": 0})
-    u.setdefault("topics", {})
+    u.setdefault("done_total", 0)
     return u
 
-def update_interval(card: dict, correct: bool) -> dict:
+def update_interval(card: dict, correct: bool):
     if correct:
         card["interval"] = min(max(1, card.get("interval", 1)) * 2, 60)
         next_day = datetime.now() + timedelta(days=card["interval"])
@@ -180,38 +160,28 @@ def update_interval(card: dict, correct: bool) -> dict:
     card["next_review"] = next_day.strftime(DATE_FMT)
     return card
 
-def check_and_award_achievements(uid: str) -> List[str]:
-    """Возвращает список новых описаний наград."""
-    u = progress[uid]
-    got = set(u.get("achievements", []))
-    new_msgs = []
-
-    # Streak
-    s = int(u.get("streak", 0))
-    for days, title, emoji in ACHIEVEMENTS_STREAK:
-        key = f"streak:{days}"
-        if s >= days and key not in got:
-            u["achievements"].append(key)
-            new_msgs.append(f"{emoji} Достижение: «{title}» — серия {days}+ дней!")
-
-    # Done total
-    d = int(u.get("total_answers", 0))
-    for n, title, emoji in ACHIEVEMENTS_DONE:
-        key = f"done:{n}"
-        if d >= n and key not in got:
-            u["achievements"].append(key)
-            new_msgs.append(f"{emoji} Достижение: «{title}» — всего ответов {n}+!")
-    return new_msgs
+def maybe_award_achievement(u: dict):
+    """Выдать достижение по стрику, если порог достигнут впервые."""
+    streak = int(u.get("streak", 0))
+    current_ach = set(u.get("achievements", []))
+    awarded = []
+    for days, title in ACHIEVEMENT_MILESTONES:
+        if streak >= days and title not in current_ach:
+            current_ach.add(title)
+            awarded.append(title)
+    if awarded:
+        u["achievements"] = list(current_ach)
+    return awarded
 
 # ======================
 # ЛОГИКА ВОПРОСОВ
 # ======================
 async def send_question(chat_id: int, topic_filter: Optional[str] = None):
     uid = str(chat_id)
-    u = ensure_user(uid)
+    u = get_user(uid)
     cards = u.get("cards", {})
 
-    # сперва — due
+    # сначала — те, что пора повторить
     due_ids = []
     for qid_str, meta in cards.items():
         if is_due(meta.get("next_review")):
@@ -219,11 +189,12 @@ async def send_question(chat_id: int, topic_filter: Optional[str] = None):
             if topic_filter and Q_BY_ID.get(qid, {}).get("topic") != topic_filter:
                 continue
             due_ids.append(qid)
+
     if due_ids:
         qid = random.choice(due_ids)
         return await send_question_text(chat_id, Q_BY_ID[qid])
 
-    # иначе — новый
+    # иначе — новые
     done_ids = {int(k) for k in cards.keys()}
     pool = [q for q in questions if int(q["id"]) not in done_ids]
     if topic_filter:
@@ -238,11 +209,15 @@ async def send_question(chat_id: int, topic_filter: Optional[str] = None):
 async def send_question_text(chat_id: int, q: dict):
     qid = int(q["id"])
     topic = q.get("topic", "Вопрос")
-    header = f"🧠 {topic}\n\n{q['question']}\n\n"
-    options = "\n".join(f"{i+1}) {opt}" for i, opt in enumerate(q["options"]))
-    text = header + options
+    text = f"🧠 {topic}\n\n{q['question']}\n\n" + "\n".join(
+        f"{i+1}) {opt}" for i, opt in enumerate(q["options"])
+    )
+    kb = types.InlineKeyboardMarkup(row_width=3)
+    for i in range(len(q["options"])):
+        kb.insert(types.InlineKeyboardButton(str(i + 1), callback_data=f"a:{qid}:{i+1}"))
+    kb.add(types.InlineKeyboardButton("⏭ Далее", callback_data="next"))
 
-    # картинки (если есть)
+    # изображения (локальные из assets/** или URL)
     media_entries = gather_question_images(q)
     for src, caption in media_entries:
         resolved = resolve_image_source(src)
@@ -256,28 +231,26 @@ async def send_question_text(chat_id: int, q: dict):
         except Exception as exc:
             print(f"⚠️ Не удалось отправить изображение для вопроса {qid}: {src} — {exc}")
 
-    kb = types.InlineKeyboardMarkup(row_width=3)
-    for i in range(len(q["options"])):
-        kb.insert(types.InlineKeyboardButton(str(i + 1), callback_data=f"a:{qid}:{i+1}"))
-    kb.add(types.InlineKeyboardButton("⏭ Далее", callback_data="next"))
-
-    for part in split_text(text, 3500) or [text]:
-        await bot.send_message(chat_id, part, reply_markup=kb if part == (split_text(text, 3500) or [text])[0] else None)
+    for idx, part in enumerate(split_text(text, 3500) or [text]):
+        if idx == 0:
+            await bot.send_message(chat_id, part, reply_markup=kb)
+        else:
+            await bot.send_message(chat_id, part)
 
 # ======================
 # NEJM
 # ======================
-def ensure_nejm_queue(state: dict) -> List[int]:
+def ensure_nejm_queue(state: dict):
     if not nejm_cases:
         return []
-    q = state.get("queue") or []
-    if not q:
-        q = [int(x["id"]) for x in nejm_cases if "id" in x]
-        random.shuffle(q)
-        state["queue"] = q
-    return q
+    queue = state.get("queue")
+    if not queue:
+        queue = [item.get("id") for item in nejm_cases if item.get("id") is not None]
+        random.shuffle(queue)
+        state["queue"] = queue
+    return queue
 
-def get_nejm_case(case_id: int) -> Optional[dict]:
+def get_nejm_case(case_id: int):
     for case in nejm_cases:
         if int(case.get("id", -1)) == int(case_id):
             return case
@@ -285,9 +258,10 @@ def get_nejm_case(case_id: int) -> Optional[dict]:
 
 async def send_nejm_case(chat_id: int, *, notify_reset: bool = False):
     uid = str(chat_id)
-    u = ensure_user(uid)
-    state = u.setdefault("nejm", {"queue": [], "answered": 0, "current": None})
+    user = get_user(uid)
+    state = user.setdefault("nejm", {"queue": [], "answered": 0, "current": None})
     queue = ensure_nejm_queue(state)
+
     if not nejm_cases:
         await bot.send_message(chat_id, "Пока нет кейсов NEJM. Добавь их в nejm_cases.json.")
         return
@@ -299,23 +273,23 @@ async def send_nejm_case(chat_id: int, *, notify_reset: bool = False):
     case_id = queue.pop(0)
     case = get_nejm_case(case_id)
     if not case:
-        await bot.send_message(chat_id, "Не удалось получить кейс. Попробуй позже.")
+        await bot.send_message(chat_id, "Не удалось получить клинический кейс. Попробуй ещё раз позже.")
         save_progress(progress)
         return
 
     state["current"] = int(case_id)
     ordinal = (state.get("answered", 0) % max(1, TOTAL_NEJM)) + 1
     header = f"🩺 NEJM Clinical Case {ordinal} из {TOTAL_NEJM}"
-    body = f"{header}\n\n{case['question']}\n\n" + "\n".join(
-        f"{i+1}) {opt}" for i, opt in enumerate(case.get("options", []))
+    text = f"{header}\n\n{case['question']}\n\n" + "\n".join(
+        f"{idx + 1}) {opt}" for idx, opt in enumerate(case.get("options", []))
     )
+    kb = types.InlineKeyboardMarkup(row_width=2)
+    for idx in range(len(case.get("options", []))):
+        kb.insert(types.InlineKeyboardButton(str(idx + 1), callback_data=f"nejm:answer:{case_id}:{idx+1}"))
 
-    # изображения
-    media_entries = gather_question_images(case)
-    for src, caption in media_entries:
+    # изображения для кейса
+    for src, caption in gather_question_images(case):
         resolved = resolve_image_source(src)
-        if not resolved:
-            continue
         cap = caption.strip() if isinstance(caption, str) else None
         if cap and len(cap) > 1024:
             cap = cap[:1021] + "..."
@@ -324,12 +298,11 @@ async def send_nejm_case(chat_id: int, *, notify_reset: bool = False):
         except Exception as exc:
             print(f"⚠️ Не удалось отправить изображение для кейса {case_id}: {src} — {exc}")
 
-    kb = types.InlineKeyboardMarkup(row_width=2)
-    for i in range(len(case.get("options", []))):
-        kb.insert(types.InlineKeyboardButton(str(i + 1), callback_data=f"nejm:answer:{case_id}:{i+1}"))
-
-    for part in split_text(body, 3500) or [body]:
-        await bot.send_message(chat_id, part, reply_markup=kb if part == (split_text(body, 3500) or [body])[0] else None)
+    for idx, part in enumerate(split_text(text, 3500) or [text]):
+        if idx == 0:
+            await bot.send_message(chat_id, part, reply_markup=kb)
+        else:
+            await bot.send_message(chat_id, part)
 
     if notify_reset:
         await bot.send_message(chat_id, "Ты прошёл все кейсы — последовательность обновлена, можно продолжать! ✅")
@@ -341,8 +314,8 @@ async def send_nejm_case(chat_id: int, *, notify_reset: bool = False):
 # ======================
 async def send_practicum_card(chat_id: int, direction: str = "stay", message: Optional[types.Message] = None):
     uid = str(chat_id)
-    u = ensure_user(uid)
-    state = u.setdefault("practicum", {"index": 0})
+    user = get_user(uid)
+    state = user.setdefault("practicum", {"index": 0})
     if not practicum_cards:
         await bot.send_message(chat_id, "Практикум пока пуст. Добавь карточки в practicum.json.")
         return
@@ -358,36 +331,42 @@ async def send_practicum_card(chat_id: int, direction: str = "stay", message: Op
     card = practicum_cards[idx]
     title = card.get("title", "Практикум")
     body = card.get("content", "")
-    text = f"{title}\n\n{body}\n\n📚 Карточка {idx + 1} из {total}".strip()
+    footer = f"\n\n📚 Карточка {idx + 1} из {total}"
+    text = f"{title}\n\n{body}{footer}".strip()
 
     kb = types.InlineKeyboardMarkup(row_width=2)
-    kb.add(types.InlineKeyboardButton("⬅️ Назад", callback_data="practicum:prev"),
-           types.InlineKeyboardButton("⏭ Далее", callback_data="practicum:next"))
+    kb.add(
+        types.InlineKeyboardButton("⬅️ Назад", callback_data="practicum:prev"),
+        types.InlineKeyboardButton("⏭ Далее", callback_data="practicum:next")
+    )
 
-    if message:
-        await message.edit_text(text, reply_markup=kb)
+    if message is not None:
+        try:
+            await message.edit_text(text, reply_markup=kb)
+        except Exception:
+            await bot.send_message(chat_id, text, reply_markup=kb)
     else:
         await bot.send_message(chat_id, text, reply_markup=kb)
 
     save_progress(progress)
 
 # ======================
-# ХЕНДЛЕРЫ
+# КОМАНДЫ
 # ======================
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
     uid = str(message.chat.id)
     uname = message.from_user.first_name or "Без имени"
-    ensure_user(uid, uname)
+    get_user(uid, uname)
     save_progress(progress)
 
     kb = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⏭ Начать", callback_data="next"))
     await message.answer(
         f"👋 Привет, {uname}!\n\n"
         "Этот бот учит педиатрию с интервальным повторением.\n\n"
-        "💡 Ошибки — завтра; верные — через 2, 4, 8 и т.д. дней.\n\n"
-        f"📚 Всего вопросов: {TOTAL_QUESTIONS}.\n"
-        f"🩺 NEJM кейсов: {TOTAL_NEJM} • 🛠 Practicum: {TOTAL_PRACTICUM}\n\n"
+        "💡 Ошибки повторяются завтра, верные ответы — через 2, 4, 8 и т.д. дней.\n\n"
+        f"📚 Вопросов: {TOTAL_QUESTIONS}\n"
+        f"🩺 NEJM кейсов: {TOTAL_NEJM} | 🛠 Практикум: {TOTAL_PRACTICUM}\n\n"
         "Смотри /help.",
         reply_markup=kb
     )
@@ -400,20 +379,19 @@ async def help_cmd(message: types.Message):
         "/review — повтор карточек на сегодня\n"
         "/stats — статистика\n"
         "/goal N — цель на день\n"
-        "/achievements — твои достижения\n"
-        "/top_done — топ по количеству ответов\n"
-        "/top_streak — топ по серии\n"
-        "/nejm — клинические кейсы (с изображениями)\n"
-        "/practicum — карточки практикума\n"
-        "/reset_topic — сброс прогресса по теме\n"
+        "/reset_topic — сброс темы\n"
         "/reset — полный сброс\n"
-        "/users — количество пользователей (админ)"
+        "/users — число пользователей (админ)\n"
+        "/top_done — топ по количеству ответов\n"
+        "/top_streak — топ по стрику\n"
+        "/nejm — режим клинических кейсов (с картинками)\n"
+        "/practicum — практикум (полезные карточки)\n"
     )
 
 @dp.message_handler(commands=["goal"])
 async def set_goal(message: types.Message):
     uid = str(message.chat.id)
-    u = ensure_user(uid)
+    u = get_user(uid)
     parts = message.text.split()
     if len(parts) < 2 or not parts[1].isdigit():
         return await message.answer("Формат: /goal 15 — сколько карточек в день.")
@@ -431,22 +409,10 @@ async def choose_topic(message: types.Message):
         kb.insert(types.InlineKeyboardButton(t, callback_data=f"train_{idx}"))
     await message.answer("🎯 Выбери тему для тренировки:", reply_markup=kb)
 
-@dp.callback_query_handler(lambda c: c.data.startswith("train_"))
-async def train_topic(callback_query: types.CallbackQuery):
-    await callback_query.answer()
-    try:
-        idx = int(callback_query.data.replace("train_", "", 1))
-        topic = TOPIC_MAP[idx]
-    except Exception:
-        await bot.send_message(callback_query.from_user.id, "⚠️ Ошибка выбора темы.")
-        return
-    await bot.send_message(callback_query.from_user.id, f"📚 Тема: {topic}")
-    await send_question(callback_query.from_user.id, topic_filter=topic)
-
 @dp.message_handler(commands=["review"])
 async def review_today(message: types.Message):
     uid = str(message.chat.id)
-    u = ensure_user(uid)
+    u = get_user(uid)
     due = [int(qid) for qid, meta in u.get("cards", {}).items() if is_due(meta.get("next_review"))]
     if not due:
         return await message.answer("✅ На сегодня нет карточек к повтору.")
@@ -457,109 +423,60 @@ async def review_today(message: types.Message):
 @dp.message_handler(commands=["stats"])
 async def stats(message: types.Message):
     uid = str(message.chat.id)
-    u = ensure_user(uid)
-    total_cards = len(u.get("cards", {}))
+    u = get_user(uid)
+    total = len(u.get("cards", {}))
     due = sum(1 for meta in u.get("cards", {}).values() if is_due(meta.get("next_review")))
     goal = u.get("goal_per_day", 10)
     done = u.get("done_today", 0)
     streak = u.get("streak", 0)
-    total_correct = sum(t["correct"] for t in u.get("topics", {}).values())
-    total_answers = sum(t["total"] for t in u.get("topics", {}).values())
-    u["total_answers"] = max(u.get("total_answers", 0), total_answers)
+    total_correct = sum(t["correct"] for t in u.get("topics", {}).values()) if u.get("topics") else 0
+    total_answers = sum(t["total"] for t in u.get("topics", {}).values()) if u.get("topics") else 0
     acc = round(100 * total_correct / total_answers) if total_answers else 0
+    ach = u.get("achievements", [])
+    ach_str = "• " + "\n• ".join(ach) if ach else "—"
+
     msg = (
         f"🎯 Цель: {goal}/день\n"
         f"📊 Сегодня: {done}/{goal}\n"
         f"🔥 Серия: {streak} дней\n"
-        f"📘 Выученных карточек: {total_cards}\n"
+        f"📘 Изучено карточек (уникальных): {total}\n"
         f"📅 К повтору: {due}\n"
-        f"💯 Точность: {acc}%\n"
-        f"🧮 Всего ответов: {u['total_answers']}"
+        f"💯 Точность: {acc}%\n\n"
+        f"🏆 Достижения:\n{ach_str}"
     )
     await message.answer(msg)
 
-@dp.message_handler(commands=["achievements"])
-async def achievements(message: types.Message):
-    uid = str(message.chat.id)
-    u = ensure_user(uid)
-    got = set(u.get("achievements", []))
-    if not got:
-        await message.answer("Пока нет достижений. Держи ритм — и всё прилетит. 💪")
-        return
-    lines = ["🏆 Твои достижения:"]
-    for key in sorted(got):
-        kind, val = key.split(":")
-        if kind == "streak":
-            days = int(val)
-            rec = next((x for x in ACHIEVEMENTS_STREAK if x[0] == days), None)
-            if rec: lines.append(f"{rec[2]} {rec[1]} — серия {days}+")
-        elif kind == "done":
-            n = int(val)
-            rec = next((x for x in ACHIEVEMENTS_DONE if x[0] == n), None)
-            if rec: lines.append(f"{rec[2]} {rec[1]}")
-    await message.answer("\n".join(lines))
-
-@dp.message_handler(commands=["top_done"])
-async def top_done(message: types.Message):
-    # Топ по total_answers
-    items = []
-    for uid, u in progress.items():
-        name = u.get("name", "Без имени")
-        total = max(u.get("total_answers", 0), sum(t["total"] for t in u.get("topics", {}).values()))
-        items.append((total, name))
-    items.sort(reverse=True)
-    lines = ["🏅 Топ по количеству ответов:"]
-    for i, (total, name) in enumerate(items[:10], 1):
-        lines.append(f"{i}. {name} — {total}")
-    await message.answer("\n".join(lines))
-
-@dp.message_handler(commands=["top_streak"])
-async def top_streak(message: types.Message):
-    items = []
-    for uid, u in progress.items():
-        name = u.get("name", "Без имени")
-        items.append((int(u.get("streak", 0)), name))
-    items.sort(reverse=True)
-    lines = ["🔥 Топ по серии (streak):"]
-    for i, (s, name) in enumerate(items[:10], 1):
-        lines.append(f"{i}. {name} — {s} дней")
-    await message.answer("\n".join(lines))
-
-@dp.message_handler(commands=["nejm"])
-async def nejm_command(message: types.Message):
-    if not nejm_cases:
-        await message.answer("Пока нет кейсов NEJM. Добавь их в nejm_cases.json.")
-        return
-    intro = (
-        "🩺 New England Journal of Medicine — клинические кейсы с изображениями.\n\n"
-        f"📦 Доступно кейсов: {TOTAL_NEJM}.\n"
-        "Нажми «Начать», чтобы получить кейс."
-    )
-    kb = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⏭ Начать", callback_data="nejm:next"))
-    await message.answer(intro, reply_markup=kb)
-
-@dp.message_handler(commands=["practicum"])
-async def practicum_command(message: types.Message):
-    if not practicum_cards:
-        await message.answer("Практикум пока пуст. Добавь карточки в practicum.json.")
-        return
-    intro = (
-        "🛠 Практикум по педиатрии — краткие карточки с советами и алгоритмами.\n\n"
-        f"📦 Всего карточек: {TOTAL_PRACTICUM}.\n"
-        "Нажми «Открыть», чтобы начать."
-    )
-    kb = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("📖 Открыть", callback_data="practicum:open"))
-    await message.answer(intro, reply_markup=kb)
-
 @dp.message_handler(commands=["users"])
 async def users_count(message: types.Message):
-    if str(message.chat.id) != str(ADMIN_ID):
+    uid = str(message.chat.id)
+    if uid != str(ADMIN_ID):
         return await message.answer("⛔ Команда только для администратора.")
     try:
         count = len(progress.keys())
         await message.answer(f"👥 Всего пользователей: {count}")
     except Exception as e:
         await message.answer(f"⚠️ Ошибка: {e}")
+
+@dp.message_handler(commands=["top_done"])
+async def top_done(message: types.Message):
+    # ранжируем по done_total
+    rows = []
+    for uid, u in progress.items():
+        name = u.get("name", "Без имени")
+        rows.append((int(u.get("done_total", 0)), name))
+    rows.sort(reverse=True)
+    lines = [f"{i+1}. {name} — {cnt}" for i, (cnt, name) in enumerate(rows[:10])]
+    await message.answer("🏆 Топ по количеству ответов:\n" + ("\n".join(lines) if lines else "—"))
+
+@dp.message_handler(commands=["top_streak"])
+async def top_streak(message: types.Message):
+    rows = []
+    for uid, u in progress.items():
+        name = u.get("name", "Без имени")
+        rows.append((int(u.get("streak", 0)), name))
+    rows.sort(reverse=True)
+    lines = [f"{i+1}. {name} — {cnt} дн." for i, (cnt, name) in enumerate(rows[:10])]
+    await message.answer("🔥 Топ по стрику:\n" + ("\n".join(lines) if lines else "—"))
 
 @dp.message_handler(commands=["reset_topic"])
 async def reset_topic(message: types.Message):
@@ -569,24 +486,6 @@ async def reset_topic(message: types.Message):
     for idx, t in enumerate(TOPICS):
         kb.insert(types.InlineKeyboardButton(t, callback_data=f"reset_{idx}"))
     await message.answer("Выбери тему для сброса:", reply_markup=kb)
-
-@dp.callback_query_handler(lambda c: c.data.startswith("reset_"))
-async def do_reset_topic(callback_query: types.CallbackQuery):
-    await callback_query.answer()
-    try:
-        idx = int(callback_query.data.replace("reset_", "", 1))
-        topic = TOPIC_MAP[idx]
-    except Exception:
-        await bot.send_message(callback_query.from_user.id, "⚠️ Ошибка выбора темы.")
-        return
-
-    uid = str(callback_query.from_user.id)
-    u = ensure_user(uid)
-    to_del = [qid for qid, obj in Q_BY_ID.items() if obj.get("topic") == topic]
-    for qid in to_del:
-        u["cards"].pop(str(qid), None)
-    save_progress(progress)
-    await bot.send_message(uid, f"♻️ Сбросили прогресс по теме «{topic}».")
 
 @dp.message_handler(commands=["reset"])
 async def reset_all(message: types.Message):
@@ -602,70 +501,135 @@ async def reset_all(message: types.Message):
         "goal_per_day": 10,
         "done_today": 0,
         "last_day": today_str(),
-        "total_answers": 0,
         "achievements": [],
         "nejm": {"queue": [], "answered": 0, "current": None},
         "practicum": {"index": 0},
+        "done_total": 0
     }
     save_progress(progress)
     await message.answer("🔄 Полный сброс. Начинай с /start или /train.")
 
-# ===== CALLBACKS =====
+@dp.message_handler(commands=["nejm"])
+async def nejm_command(message: types.Message):
+    if not nejm_cases:
+        await message.answer("Пока нет кейсов NEJM. Добавь их в nejm_cases.json.")
+        return
+    intro = (
+        "🩺 NEJM — клинические кейсы с изображениями и вопросами.\n\n"
+        f"📦 Всего кейсов: {TOTAL_NEJM}.\n"
+        "Нажми «Начать», чтобы получить первый случай."
+    )
+    kb = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⏭ Начать", callback_data="nejm:next"))
+    await message.answer(intro, reply_markup=kb)
+
+@dp.message_handler(commands=["practicum"])
+async def practicum_command(message: types.Message):
+    if not practicum_cards:
+        await message.answer("Практикум пока пуст. Добавь карточки в practicum.json.")
+        return
+    intro = (
+        "🛠 Практикум по педиатрии\n"
+        f"📦 Всего карточек: {TOTAL_PRACTICUM}.\n"
+        "Нажми «Открыть», чтобы начать."
+    )
+    kb = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("📖 Открыть", callback_data="practicum:open"))
+    await message.answer(intro, reply_markup=kb)
+
+# ======================
+# CALLBACK’И
+# ======================
 @dp.callback_query_handler(lambda c: c.data == "next")
 async def callback_next(call: types.CallbackQuery):
     await call.answer()
     await send_question(call.message.chat.id)
 
+@dp.callback_query_handler(lambda c: c.data.startswith("train_"))
+async def train_topic(call: types.CallbackQuery):
+    await call.answer()
+    try:
+        idx = int(call.data.replace("train_", "", 1))
+        topic = TOPIC_MAP[idx]
+    except Exception:
+        await bot.send_message(call.from_user.id, "⚠️ Ошибка выбора темы.")
+        return
+    await bot.send_message(call.from_user.id, f"📚 Тема: {topic}")
+    await send_question(call.from_user.id, topic_filter=topic)
+
+@dp.callback_query_handler(lambda c: c.data.startswith("reset_"))
+async def do_reset_topic(call: types.CallbackQuery):
+    await call.answer()
+    try:
+        idx = int(call.data.replace("reset_", "", 1))
+        topic = TOPIC_MAP[idx]
+    except Exception:
+        await bot.send_message(call.from_user.id, "⚠️ Ошибка выбора темы.")
+        return
+    uid = str(call.from_user.id)
+    u = get_user(uid)
+    to_del = [qid for qid, obj in Q_BY_ID.items() if obj.get("topic") == topic]
+    for qid in to_del:
+        u["cards"].pop(str(qid), None)
+    save_progress(progress)
+    await bot.send_message(uid, f"♻️ Сбросили прогресс по теме «{topic}».")
+
 @dp.callback_query_handler(lambda c: c.data.startswith("a:"))
 async def callback_answer(call: types.CallbackQuery):
     try:
-        _, qid_str, ans_str = call.data.split(":")
-        qid = int(qid_str); user_ans = int(ans_str) - 1
-    except Exception:
-        await call.answer("Ошибка ответа", show_alert=True); return
+        _, qid_str, answer_str = call.data.split(":")
+        qid = int(qid_str)
+        user_answer = int(answer_str) - 1
+    except (ValueError, IndexError):
+        await call.answer("Не удалось обработать ответ", show_alert=True)
+        return
 
     q = Q_BY_ID.get(qid)
     if not q:
-        await call.answer("Вопрос не найден", show_alert=True); return
+        await call.answer("Вопрос не найден", show_alert=True)
+        return
 
     uid = str(call.message.chat.id)
-    u = ensure_user(uid)
-    cards = u.setdefault("cards", {})
-    card = cards.setdefault(qid_str, {"interval": 1, "next_review": today_str()})
+    user = get_user(uid)
+    cards = user.setdefault("cards", {})
+    card = cards.setdefault(str(qid), {"interval": 1, "next_review": today_str()})
 
     topic = q.get("topic", "Без темы")
-    tstats = u.setdefault("topics", {}).setdefault(topic, {"correct": 0, "total": 0})
-    tstats["total"] += 1
+    topic_stats = user.setdefault("topics", {}).setdefault(topic, {"correct": 0, "total": 0})
+    topic_stats["total"] += 1
 
     correct_index = int(q.get("correct_index", 0))
-    is_correct = (user_ans == correct_index)
+    is_correct = user_answer == correct_index
     if is_correct:
-        tstats["correct"] += 1
+        topic_stats["correct"] += 1
     update_interval(card, is_correct)
 
-    # дневная цель / streak
-    if u.get("last_day") != today_str():
-        u["done_today"] = 0
-        u["last_day"] = today_str()
-    u["done_today"] = u.get("done_today", 0) + 1
-    u["total_answers"] = u.get("total_answers", 0) + 1
-    goal = u.get("goal_per_day", 10)
-    if u["done_today"] >= goal and u.get("last_goal_day") != today_str():
-        u["streak"] = u.get("streak", 0) + 1
-        u["last_goal_day"] = today_str()
+    # учёт активности за день/всего
+    if user.get("last_day") != today_str():
+        user["done_today"] = 0
+        user["last_day"] = today_str()
+    user["done_today"] = user.get("done_today", 0) + 1
+    user["done_total"] = user.get("done_total", 0) + 1
 
+    # стрик (когда цель достигнута впервые за день)
+    goal = user.get("goal_per_day", 10)
+    if user["done_today"] >= goal and user.get("last_goal_day") != today_str():
+        user["streak"] = user.get("streak", 0) + 1
+        user["last_goal_day"] = today_str()
+        gained = maybe_award_achievement(user)
+        if gained:
+            try:
+                await call.message.answer("🏆 Новые достижения:\n" + "\n".join(f"• {x}" for x in gained))
+            except Exception:
+                pass
+
+    user["last_review"] = today_str()
     save_progress(progress)
 
-    # достижение
-    new_awards = check_and_award_achievements(uid)
+    explanation = q.get("explanation", "").strip()
+    correct_option = q["options"][correct_index]
     status = "✅ Верно!" if is_correct else "❌ Неверно."
-    correct_opt = q["options"][correct_index]
-    reply = f"{status}\n\nПравильный ответ: {correct_opt}"
-    exp = q.get("explanation", "").strip()
-    if exp:
-        reply += f"\n\n{exp}"
-    if new_awards:
-        reply += "\n\n" + "\n".join(new_awards)
+    reply = f"{status}\n\nПравильный ответ: {correct_option}"
+    if explanation:
+        reply += f"\n\n{explanation}"
 
     try:
         await call.message.edit_reply_markup()
@@ -673,23 +637,25 @@ async def callback_answer(call: types.CallbackQuery):
         pass
 
     kb = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⏭ Далее", callback_data="next"))
-    await call.answer("Принято")
-    for part in split_text(reply, 3500) or [reply]:
-        await call.message.answer(part, reply_markup=kb if part == (split_text(reply, 3500) or [reply])[0] else None)
+    await call.answer("Верно" if is_correct else "Неверно", show_alert=False)
+    await call.message.answer(reply, reply_markup=kb)
 
 @dp.callback_query_handler(lambda c: c.data.startswith("nejm:"))
 async def callback_nejm(call: types.CallbackQuery):
     parts = call.data.split(":")
     if len(parts) < 2:
-        await call.answer(); return
+        await call.answer()
+        return
     action = parts[1]
     uid = str(call.message.chat.id)
-    u = ensure_user(uid)
-    state = u.setdefault("nejm", {"queue": [], "answered": 0, "current": None})
+    user = get_user(uid)
+    state = user.setdefault("nejm", {"queue": [], "answered": 0, "current": None})
 
     if action == "next":
-        try: await call.message.edit_reply_markup()
-        except Exception: pass
+        try:
+            await call.message.edit_reply_markup()
+        except Exception:
+            pass
         await call.answer()
         await send_nejm_case(call.message.chat.id)
         return
@@ -699,30 +665,34 @@ async def callback_nejm(call: types.CallbackQuery):
             case_id = int(parts[2])
             answer_idx = int(parts[3]) - 1
         except ValueError:
-            await call.answer("Ошибка ответа", show_alert=True); return
+            await call.answer("Ошибка ответа", show_alert=True)
+            return
 
         case = get_nejm_case(case_id)
         if not case:
-            await call.answer("Кейс не найден", show_alert=True); return
+            await call.answer("Кейс не найден", show_alert=True)
+            return
 
         correct_index = int(case.get("correct_index", 0))
-        is_correct = (answer_idx == correct_index)
+        is_correct = answer_idx == correct_index
         state["answered"] = state.get("answered", 0) + 1
         save_progress(progress)
 
         options = case.get("options", [])
-        correct_opt = options[correct_index] if 0 <= correct_index < len(options) else "—"
+        correct_option = options[correct_index] if 0 <= correct_index < len(options) else "—"
         status = "✅ Верно!" if is_correct else "❌ Неверно."
-        reply = f"{status}\n\nПравильный ответ: {correct_opt}"
-        exp = case.get("explanation")
-        if exp:
-            reply += f"\n\n{exp}"
+        reply = f"{status}\n\nПравильный ответ: {correct_option}"
+        explanation = case.get("explanation")
+        if explanation:
+            reply += f"\n\n{explanation}"
 
-        try: await call.message.edit_reply_markup()
-        except Exception: pass
+        try:
+            await call.message.edit_reply_markup()
+        except Exception:
+            pass
 
         kb = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⏭ Далее", callback_data="nejm:next"))
-        await call.answer("Принято")
+        await call.answer("Верно" if is_correct else "Неверно")
         await call.message.answer(reply, reply_markup=kb)
         return
 
@@ -732,7 +702,8 @@ async def callback_nejm(call: types.CallbackQuery):
 async def callback_practicum(call: types.CallbackQuery):
     parts = call.data.split(":", maxsplit=1)
     if len(parts) != 2:
-        await call.answer(); return
+        await call.answer()
+        return
     action = parts[1]
     await call.answer()
     if action == "open":
@@ -743,30 +714,25 @@ async def callback_practicum(call: types.CallbackQuery):
         await send_practicum_card(call.message.chat.id, direction="prev", message=call.message)
 
 # ======================
-# ЗАПУСК
+# ЗАПУСК (POLLING ONLY)
 # ======================
 if __name__ == "__main__":
-    print("✅ Бот запущен и ждёт сообщений в Telegram...")
-
-    import threading
-    from server import app
-    threading.Thread(target=lambda: app.run(host="0.0.0.0", port=10000), daemon=True).start()
-
-    loop = asyncio.get_event_loop()
-    loop.create_task(dp.bot.set_my_commands([
-        types.BotCommand("start", "Начать"),
-        types.BotCommand("help", "Помощь"),
-        types.BotCommand("train", "Выбор темы"),
-        types.BotCommand("review", "Повтор на сегодня"),
-        types.BotCommand("stats", "Статистика"),
-        types.BotCommand("goal", "Цель на день"),
-        types.BotCommand("achievements", "Мои достижения"),
-        types.BotCommand("top_done", "Топ отвеченных"),
-        types.BotCommand("top_streak", "Топ по серии"),
-        types.BotCommand("reset_topic", "Сброс темы"),
-        types.BotCommand("reset", "Полный сброс"),
-        types.BotCommand("nejm", "Клинические кейсы NEJM"),
-        types.BotCommand("practicum", "Практикум по педиатрии"),
-        types.BotCommand("users", "Пользователи (админ)"),
-    ]))
+    # Команды в меню бота
+    asyncio.get_event_loop().run_until_complete(
+        dp.bot.set_my_commands([
+            types.BotCommand("start", "Начать"),
+            types.BotCommand("help", "Помощь"),
+            types.BotCommand("train", "Выбор темы"),
+            types.BotCommand("review", "Повтор на сегодня"),
+            types.BotCommand("stats", "Статистика"),
+            types.BotCommand("goal", "Цель на день"),
+            types.BotCommand("reset_topic", "Сброс темы"),
+            types.BotCommand("reset", "Полный сброс"),
+            types.BotCommand("nejm", "Кейсы NEJM"),
+            types.BotCommand("practicum", "Практикум"),
+            types.BotCommand("top_done", "Топ отвеченных"),
+            types.BotCommand("top_streak", "Топ стрика"),
+        ])
+    )
+    print("✅ Бот запущен (polling)...")
     executor.start_polling(dp, skip_updates=True)
