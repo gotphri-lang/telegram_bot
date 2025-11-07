@@ -9,7 +9,7 @@ from pathlib import Path
 # ======================
 # НАСТРОЙКА
 # ======================
-BOT_TOKEN = "8242848619:AAF-hYX8z1oWNrNLqgvqEKGefBaJtZ7qB0I"
+BOT_TOKEN = "242848619:AAF2wA3EazZZD38fMHcTjeSNx-D-cDb85HQ"
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
 
