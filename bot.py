@@ -109,11 +109,97 @@ nejm_cases = load_optional_json(NEJM_FILE)
 practicum_cards = load_optional_json(PRACTICUM_FILE)
 
 Q_BY_ID = {int(q["id"]): q for q in questions}
-TOPICS = sorted(set(q.get("topic", "Без темы") for q in questions))
+
+# ======= БАЗОВЫЕ ТЕМЫ =======
+TOPICS = [
+    "Педиатрия",
+    "Неонатология",
+    "Инфекционные болезни",
+    "Неврология",
+    "Кардиология",
+    "Эндокринология",
+    "Нефрология",
+    "Гастроэнтерология",
+    "Пульмонология",
+    "Ревматология",
+]
 TOPIC_MAP = {i: t for i, t in enumerate(TOPICS)}
+
 TOTAL_QUESTIONS = len(questions)
 TOTAL_NEJM = len(nejm_cases)
 TOTAL_PRACTICUM = len(practicum_cards)
+
+# ======================
+# КОМАНДЫ
+# ======================
+
+@dp.message_handler(commands=["start"])
+async def start(message: types.Message):
+    uid = str(message.chat.id)
+    uname = message.from_user.first_name or "Без имени"
+    ensure_user(uid, uname)
+    save_progress(progress)
+
+    kb = types.InlineKeyboardMarkup().add(
+        types.InlineKeyboardButton("⏭ Начать", callback_data="next")
+    )
+    await message.answer(
+        f"👋 Привет, {uname}!\n\n"
+        "Этот бот помогает учить педиатрию с интервальным повторением.\n\n"
+        "💡 Ошибки — завтра, верные — через 2, 4, 8... дней.\n\n"
+        f"📚 Разделы:\n🧠 PediaMed – {TOTAL_QUESTIONS}\n"
+        f"🩺 NEJM – {TOTAL_NEJM}\n"
+        f"🛠 PediaPracticum – {TOTAL_PRACTICUM}\n\n"
+        "Смотри /help для всех команд.",
+        reply_markup=kb,
+    )
+
+@dp.message_handler(commands=["help"])
+async def help_cmd(message: types.Message):
+    await message.answer(
+        "📘 Доступные команды:\n"
+        "/start – начать обучение\n"
+        "/help – эта справка\n"
+        "/train – выбрать тему\n"
+        "/review – повторить карточки на сегодня\n"
+        "/stats – посмотреть статистику\n"
+        "/goal N – задать дневную цель\n"
+        "/achievements – достижения\n"
+        "/nejm – клинические кейсы NEJM\n"
+        "/practicum – практикум по педиатрии\n"
+        "/reset – сбросить всё\n"
+        "/reset_topic – сбросить по теме\n"
+        "/top_done – топ по ответам\n"
+        "/top_streak – топ по сериям дней\n"
+        "/users – все пользователи (админ)"
+    )
+
+@dp.message_handler(commands=["stats"])
+async def stats(message: types.Message):
+    uid = str(message.chat.id)
+    u = ensure_user(uid)
+    total = len(u.get("cards", {}))
+    due = sum(1 for m in u.get("cards", {}).values() if is_due(m.get("next_review")))
+    goal = u.get("goal_per_day", 10)
+    done = u.get("done_today", 0)
+    streak = u.get("streak", 0)
+    best = u.get("best_streak", 0)
+    total_correct = sum(t["correct"] for t in u.get("topics", {}).values()) if u.get("topics") else 0
+    total_answers = sum(t["total"] for t in u.get("topics", {}).values()) if u.get("topics") else 0
+    acc = round(100 * total_correct / total_answers) if total_answers else 0
+    tokens = u.get("tokens", 0)
+
+    msg = (
+        f"🎯 Цель: {goal}/день\n"
+        f"📊 Сегодня: {done}/{goal}\n"
+        f"🔥 Серия дней подряд: {streak} (лучший результат: {best})\n"
+        f"📘 Изучено карточек: {total}\n"
+        f"📅 К повтору: {due}\n"
+        f"💯 Точность: {acc}%\n"
+        f"🪙 Токены: {tokens}\n"
+        f"🏅 Достижений: {len(u.get('achievements', []))}"
+    )
+    await message.answer(msg)
 
 # ======================
 # ДОСТИЖЕНИЯ / ТОКЕНЫ
