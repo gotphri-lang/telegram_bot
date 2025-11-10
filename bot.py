@@ -46,6 +46,7 @@ def save_progress(progress):
         json.dump(progress, f, ensure_ascii=False, indent=2)
 
 def split_text(text, limit=3500):
+    """Разбивает текст на части по лимиту, подходящему для Telegram."""
     return [text[i:i + limit] for i in range(0, len(text), limit)]
 
 def gather_images(obj: dict) -> List[str]:
@@ -170,7 +171,6 @@ async def help_cmd(message: types.Message):
         "/reset – сбросить всё\n"
         "/reset_topic – сбросить по теме\n"
         "/top_done – топ по ответам\n"
-        "/top_Серия дней подряд – топ по сериям дней\n"
         "/users – все пользователи (админ)"
     )
 
@@ -182,8 +182,11 @@ async def stats(message: types.Message):
     due = sum(1 for m in u.get("cards", {}).values() if is_due(m.get("next_review")))
     goal = u.get("goal_per_day", 10)
     done = u.get("done_today", 0)
-    Серия дней подряд = u.get("Серия дней подряд", 0)
-    best = u.get("best_Серия дней подряд", 0)
+    
+    # ИСПОЛЬЗУЕМ НОВЫЕ КЛЮЧИ:
+    current_streak = u.get("current_streak", 0)
+    best_streak = u.get("best_streak", 0)
+    
     total_correct = sum(t["correct"] for t in u.get("topics", {}).values()) if u.get("topics") else 0
     total_answers = sum(t["total"] for t in u.get("topics", {}).values()) if u.get("topics") else 0
     acc = round(100 * total_correct / total_answers) if total_answers else 0
@@ -192,7 +195,8 @@ async def stats(message: types.Message):
     msg = (
         f"🎯 Цель: {goal}/день\n"
         f"📊 Сегодня: {done}/{goal}\n"
-        f"🔥 Серия дней подряд: {Серия дней подряд} (лучший результат: {best})\n"
+        # ИЗМЕНЕННАЯ ФРАЗА:
+        f"🔥 Дней подряд: {current_streak} (лучший результат: {best_streak})\n"
         f"📘 Изучено карточек: {total}\n"
         f"📅 К повтору: {due}\n"
         f"💯 Точность: {acc}%\n"
@@ -231,8 +235,9 @@ def ensure_user(uid: str, name_hint="Без имени"):
         "name": name_hint,
         "cards": {},
         "topics": {},
-        "Серия дней подряд": 0,
-        "best_Серия дней подряд": 0,
+        # ИСПОЛЬЗУЕМ НОВЫЕ КЛЮЧИ:
+        "current_streak": 0, 
+        "best_streak": 0,
         "last_goal_day": None,
         "last_review": None,
         "goal_per_day": 10,
@@ -249,7 +254,14 @@ def ensure_user(uid: str, name_hint="Без имени"):
         u["done_today"] = 0
         u["last_day"] = today_str()
     # поля на всякий
-    u.setdefault("best_Серия дней подряд", 0)
+    # Обновляем старые ключи на новые, если они есть.
+    if "Серия дней подряд" in u:
+        u["current_streak"] = u.pop("Серия дней подряд")
+    if "best_Серия дней подряд" in u:
+        u["best_streak"] = u.pop("best_Серия дней подряд")
+
+    u.setdefault("best_streak", 0)
+    u.setdefault("current_streak", 0)
     u.setdefault("total_answered", 0)
     u.setdefault("tokens", 0)
     u.setdefault("achievements", [])
@@ -276,9 +288,10 @@ def check_awards_after_answer(u: dict) -> List[str]:
             if got:
                 gained.append(got)
     # по стрику
-    Серия дней подряд = u.get("Серия дней подряд", 0)
+    # ИСПОЛЬЗУЕМ НОВЫЙ КЛЮЧ:
+    current_streak = u.get("current_streak", 0)
     for n, title in STREAK_MILESTONES:
-        if Серия дней подряд >= n:
+        if current_streak >= n:
             got = award_achievement(u, title)
             if got:
                 gained.append(got)
@@ -380,27 +393,8 @@ def update_interval(card: dict, correct: bool):
     return card
 
 # ======================
-# КОМАНДЫ
+# ДОПОЛНИТЕЛЬНЫЕ КОМАНДЫ
 # ======================
-@dp.message_handler(commands=["start"])
-async def start(message: types.Message):
-    uid = str(message.chat.id)
-    uname = message.from_user.first_name or "Без имени"
-    ensure_user(uid, uname)
-    save_progress(progress)
-
-    kb = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⏭ Начать", callback_data="next"))
-    await message.answer(
-        f"👋 Привет, {uname}!\n\n"
-        "Этот бот учит педиатрию с интервальным повторением.\n\n"
-        "💡 Ошибки - завтра, верные - через 2, 4, 8... дней.\n\n"
-        "📚 Разделы:\n"
-        f"🧠 PediaMed - {TOTAL_QUESTIONS}\n"
-        f"🩺 NEJM - {TOTAL_NEJM}\n"
-        f"🛠 PediaPracticum - {TOTAL_PRACTICUM}\n\n"
-        "Смотри /help.",
-        reply_markup=kb
-    )
 
 @dp.message_handler(commands=["goal"])
 async def set_goal(message: types.Message):
@@ -446,32 +440,6 @@ async def review_today(message: types.Message):
     qid = random.choice(due)
     await send_question_text(message.chat.id, Q_BY_ID[qid])
 
-@dp.message_handler(commands=["stats"])
-async def stats(message: types.Message):
-    uid = str(message.chat.id)
-    u = ensure_user(uid)
-    total = len(u.get("cards", {}))
-    due = sum(1 for meta in u.get("cards", {}).values() if is_due(meta.get("next_review")))
-    goal = u.get("goal_per_day", 10)
-    done = u.get("done_today", 0)
-    Серия дней подряд = u.get("Серия дней подряд", 0)
-    best = u.get("best_Серия дней подряд", 0)
-    total_correct = sum(t["correct"] for t in u.get("topics", {}).values()) if u.get("topics") else 0
-    total_answers = sum(t["total"] for t in u.get("topics", {}).values()) if u.get("topics") else 0
-    acc = round(100 * total_correct / total_answers) if total_answers else 0
-    tokens = u.get("tokens", 0)
-    msg = (
-        f"🎯 Цель: {goal}/день\n"
-        f"📊 Сегодня: {done}/{goal}\n"
-        f"🔥 Стрик: {Серия дней подряд} (лучший {best})\n"
-        f"📘 Изучено карточек: {total}\n"
-        f"📅 К повтору: {due}\n"
-        f"💯 Точность: {acc}%\n"
-        f"🪙 Токены: {tokens}\n"
-        f"🏅 Достижений: {len(u.get('achievements', []))}"
-    )
-    await message.answer(msg)
-
 @dp.message_handler(commands=["achievements"])
 async def achievements_cmd(message: types.Message):
     uid = str(message.chat.id)
@@ -496,17 +464,7 @@ async def top_done_cmd(message: types.Message):
     lines = [f"{i+1}. {name}: {cnt}" for i, (name, cnt) in enumerate(top)]
     await message.answer("🏆 Топ по количеству ответов:\n" + "\n".join(lines))
 
-@dp.message_handler(commands=["top_Серия дней подряд"])
-async def top_Серия дней подряд_cmd(message: types.Message):
-    items = []
-    for uid, u in progress.items():
-        items.append((u.get("name", uid), u.get("best_Серия дней подряд", 0)))
-    items.sort(key=lambda x: x[1], reverse=True)
-    top = items[:10]
-    if not top:
-        return await message.answer("Топ пуст.")
-    lines = [f"{i+1}. {name}: {st}" for i, (name, st) in enumerate(top)]
-    await message.answer("🔥 Топ по лучшему стрику:\n" + "\n".join(lines))
+# УДАЛЕНА ФУНКЦИЯ top_Серия дней подряд_cmd
 
 @dp.message_handler(commands=["users"])
 async def users_count(message: types.Message):
@@ -553,8 +511,9 @@ async def reset_all(message: types.Message):
         "name": uname,
         "cards": {},
         "topics": {},
-        "Серия дней подряд": 0,
-        "best_Серия дней подряд": 0,
+        # ИСПОЛЬЗУЕМ НОВЫЕ КЛЮЧИ:
+        "current_streak": 0,
+        "best_streak": 0,
         "last_goal_day": None,
         "last_review": None,
         "goal_per_day": 10,
@@ -645,6 +604,7 @@ async def callback_nejm(call: types.CallbackQuery):
 
     if action == "next":
         try:
+            # Удаляем клавиатуру из текущего сообщения перед отправкой нового
             await call.message.edit_reply_markup()
         except Exception:
             pass
@@ -684,8 +644,16 @@ async def callback_nejm(call: types.CallbackQuery):
             pass
 
         kb = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⏭ Далее", callback_data="nejm:next"))
+        
         await call.answer("Верно" if is_correct else "Неверно")
-        await call.message.answer(reply, reply_markup=kb)
+        
+        # Разбиваем ответ, чтобы избежать Message too long
+        parts = split_text(reply, 3000)
+        for idx, part in enumerate(parts):
+            # Клавиатура прикрепляется ТОЛЬКО к последней части
+            reply_markup = kb if idx == len(parts) - 1 else None
+            await bot.send_message(uid, part, reply_markup=reply_markup)
+        
         return
 
     await call.answer()
@@ -706,6 +674,7 @@ async def practicum_command(message: types.Message):
     kb = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("📖 Открыть", callback_data="practicum:open"))
     await message.answer(intro, reply_markup=kb)
 
+# ИСПРАВЛЕННАЯ ФУНКЦИЯ ДЛЯ КОРРЕКТНОЙ ОБРАБОТКИ ДЛИННОГО ТЕКСТА
 async def send_practicum_card(chat_id: int, direction: str = "stay", message_obj: Optional[types.Message] = None):
     uid = str(chat_id)
     user = ensure_user(uid)
@@ -733,14 +702,31 @@ async def send_practicum_card(chat_id: int, direction: str = "stay", message_obj
         types.InlineKeyboardButton("⬅️ Назад", callback_data="practicum:prev"),
         types.InlineKeyboardButton("⏭ Далее", callback_data="practicum:next")
     )
+    
+    parts = split_text(text, 3500) # <--- Разбиваем текст
 
-    if message_obj is not None:
+    # Если это короткое сообщение (одна часть) и есть что редактировать:
+    if message_obj is not None and len(parts) == 1:
         try:
+            # Редактируем существующее сообщение для плавной навигации
             await message_obj.edit_text(text, reply_markup=kb)
         except Exception:
+            # Отправляем новое сообщение, если редактирование не удалось
             await bot.send_message(chat_id, text, reply_markup=kb)
     else:
-        await bot.send_message(chat_id, text, reply_markup=kb)
+        # Если карточка слишком длинная (более 1 части) или нет сообщения для редактирования, 
+        # отправляем новое(ые) сообщение(я). 
+        # Сначала пробуем удалить старую клавиатуру, если есть.
+        if message_obj is not None:
+            try:
+                await message_obj.edit_reply_markup()
+            except Exception:
+                pass # Игнорируем ошибку, если сообщение уже изменено/удалено
+
+        for idx_part, part in enumerate(parts):
+            # Прикрепляем клавиатуру только к последней части сообщения
+            reply_markup = kb if idx_part == len(parts) - 1 else None
+            await bot.send_message(chat_id, part, reply_markup=reply_markup)
 
     save_progress(progress)
 
@@ -752,7 +738,10 @@ async def callback_practicum(call: types.CallbackQuery):
         return
     action = parts[1]
     await call.answer()
+    
+    # Логика теперь использует message_obj для попытки редактирования, если это возможно
     if action == "open":
+        # Если "open" вызвано из сообщения, пытаемся его отредактировать
         await send_practicum_card(call.message.chat.id, direction="stay", message_obj=call.message)
     elif action == "next":
         await send_practicum_card(call.message.chat.id, direction="next", message_obj=call.message)
@@ -801,12 +790,14 @@ async def handle_answer(callback_query: types.CallbackQuery):
     if u.get("last_day") != today_str():
         u["done_today"] = 0
         u["last_day"] = today_str()
+        
     u["done_today"] = u.get("done_today", 0) + 1
 
     goal = u.get("goal_per_day", 10)
     if u["done_today"] >= goal and u.get("last_goal_day") != today_str():
-        u["Серия дней подряд"] = u.get("Серия дней подряд", 0) + 1
-        u["best_Серия дней подряд"] = max(u.get("best_Серия дней подряд", 0), u["Серия дней подряд"])
+        # ИСПОЛЬЗУЕМ НОВЫЕ КЛЮЧИ:
+        u["current_streak"] = u.get("current_streak", 0) + 1
+        u["best_streak"] = max(u.get("best_streak", 0), u["current_streak"])
         u["last_goal_day"] = today_str()
 
     # общий счёт
@@ -829,9 +820,20 @@ async def handle_answer(callback_query: types.CallbackQuery):
             reply_lines.append(f"🎖 Новое достижение: {a} (+{ACH_REWARD_TOKENS} токенов)")
 
     kb = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⏭ Далее", callback_data="next"))
-    for part in split_text("\n".join(reply_lines), 3000):
-        await bot.send_message(uid, part, reply_markup=kb if part.endswith(")") or part.endswith("⏭ Далее") else None)
-        kb = None  # чтобы не повторять клавиатуру на каждом куске
+    parts = split_text("\n".join(reply_lines), 3000)
+
+    # УДАЛЯЕМ старую клавиатуру из сообщения с вопросом
+    try:
+        await callback_query.message.edit_reply_markup()
+    except Exception:
+        pass
+
+    # ОТПРАВЛЯЕМ ответ, прикрепляя клавиатуру к последней части
+    for idx, part in enumerate(parts):
+        # Клавиатура прикрепляется ТОЛЬКО к последней части сообщения
+        reply_markup = kb if idx == len(parts) - 1 else None
+        await bot.send_message(uid, part, reply_markup=reply_markup)
+
 
 # ======================
 # ЗАПУСК
@@ -856,11 +858,9 @@ if __name__ == "__main__":
         types.BotCommand("stats", "Статистика"),
         types.BotCommand("achievements", "Достижения"),
         types.BotCommand("top_done", "Топ ответов"),
-        types.BotCommand("top_Серия дней подряд", "Топ стрика"),
         types.BotCommand("goal", "Цель на день"),
         types.BotCommand("reset_topic", "Сброс темы"),
         types.BotCommand("reset", "Полный сброс"),
-        types.BotCommand("users", "Пользователи (админ)"),
         types.BotCommand("nejm", "NEJM кейсы"),
         types.BotCommand("practicum", "Практикум"),
     ]))
