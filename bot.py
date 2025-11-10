@@ -170,7 +170,7 @@ async def help_cmd(message: types.Message):
         "/reset – сбросить всё\n"
         "/reset_topic – сбросить по теме\n"
         "/top_done – топ по ответам\n"
-        "/top_streak – топ по сериям дней\n"
+        "/top_Серия дней подряд – топ по сериям дней\n"
         "/users – все пользователи (админ)"
     )
 
@@ -182,8 +182,8 @@ async def stats(message: types.Message):
     due = sum(1 for m in u.get("cards", {}).values() if is_due(m.get("next_review")))
     goal = u.get("goal_per_day", 10)
     done = u.get("done_today", 0)
-    streak = u.get("streak", 0)
-    best = u.get("best_streak", 0)
+    Серия дней подряд = u.get("Серия дней подряд", 0)
+    best = u.get("best_Серия дней подряд", 0)
     total_correct = sum(t["correct"] for t in u.get("topics", {}).values()) if u.get("topics") else 0
     total_answers = sum(t["total"] for t in u.get("topics", {}).values()) if u.get("topics") else 0
     acc = round(100 * total_correct / total_answers) if total_answers else 0
@@ -192,7 +192,7 @@ async def stats(message: types.Message):
     msg = (
         f"🎯 Цель: {goal}/день\n"
         f"📊 Сегодня: {done}/{goal}\n"
-        f"🔥 Серия дней подряд: {streak} (лучший результат: {best})\n"
+        f"🔥 Серия дней подряд: {Серия дней подряд} (лучший результат: {best})\n"
         f"📘 Изучено карточек: {total}\n"
         f"📅 К повтору: {due}\n"
         f"💯 Точность: {acc}%\n"
@@ -231,8 +231,8 @@ def ensure_user(uid: str, name_hint="Без имени"):
         "name": name_hint,
         "cards": {},
         "topics": {},
-        "streak": 0,
-        "best_streak": 0,
+        "Серия дней подряд": 0,
+        "best_Серия дней подряд": 0,
         "last_goal_day": None,
         "last_review": None,
         "goal_per_day": 10,
@@ -249,7 +249,7 @@ def ensure_user(uid: str, name_hint="Без имени"):
         u["done_today"] = 0
         u["last_day"] = today_str()
     # поля на всякий
-    u.setdefault("best_streak", 0)
+    u.setdefault("best_Серия дней подряд", 0)
     u.setdefault("total_answered", 0)
     u.setdefault("tokens", 0)
     u.setdefault("achievements", [])
@@ -276,9 +276,9 @@ def check_awards_after_answer(u: dict) -> List[str]:
             if got:
                 gained.append(got)
     # по стрику
-    streak = u.get("streak", 0)
+    Серия дней подряд = u.get("Серия дней подряд", 0)
     for n, title in STREAK_MILESTONES:
-        if streak >= n:
+        if Серия дней подряд >= n:
             got = award_achievement(u, title)
             if got:
                 gained.append(got)
@@ -454,8 +454,8 @@ async def stats(message: types.Message):
     due = sum(1 for meta in u.get("cards", {}).values() if is_due(meta.get("next_review")))
     goal = u.get("goal_per_day", 10)
     done = u.get("done_today", 0)
-    streak = u.get("streak", 0)
-    best = u.get("best_streak", 0)
+    Серия дней подряд = u.get("Серия дней подряд", 0)
+    best = u.get("best_Серия дней подряд", 0)
     total_correct = sum(t["correct"] for t in u.get("topics", {}).values()) if u.get("topics") else 0
     total_answers = sum(t["total"] for t in u.get("topics", {}).values()) if u.get("topics") else 0
     acc = round(100 * total_correct / total_answers) if total_answers else 0
@@ -463,7 +463,7 @@ async def stats(message: types.Message):
     msg = (
         f"🎯 Цель: {goal}/день\n"
         f"📊 Сегодня: {done}/{goal}\n"
-        f"🔥 Стрик: {streak} (лучший {best})\n"
+        f"🔥 Стрик: {Серия дней подряд} (лучший {best})\n"
         f"📘 Изучено карточек: {total}\n"
         f"📅 К повтору: {due}\n"
         f"💯 Точность: {acc}%\n"
@@ -496,11 +496,11 @@ async def top_done_cmd(message: types.Message):
     lines = [f"{i+1}. {name}: {cnt}" for i, (name, cnt) in enumerate(top)]
     await message.answer("🏆 Топ по количеству ответов:\n" + "\n".join(lines))
 
-@dp.message_handler(commands=["top_streak"])
-async def top_streak_cmd(message: types.Message):
+@dp.message_handler(commands=["top_Серия дней подряд"])
+async def top_Серия дней подряд_cmd(message: types.Message):
     items = []
     for uid, u in progress.items():
-        items.append((u.get("name", uid), u.get("best_streak", 0)))
+        items.append((u.get("name", uid), u.get("best_Серия дней подряд", 0)))
     items.sort(key=lambda x: x[1], reverse=True)
     top = items[:10]
     if not top:
@@ -553,8 +553,8 @@ async def reset_all(message: types.Message):
         "name": uname,
         "cards": {},
         "topics": {},
-        "streak": 0,
-        "best_streak": 0,
+        "Серия дней подряд": 0,
+        "best_Серия дней подряд": 0,
         "last_goal_day": None,
         "last_review": None,
         "goal_per_day": 10,
@@ -805,8 +805,8 @@ async def handle_answer(callback_query: types.CallbackQuery):
 
     goal = u.get("goal_per_day", 10)
     if u["done_today"] >= goal and u.get("last_goal_day") != today_str():
-        u["streak"] = u.get("streak", 0) + 1
-        u["best_streak"] = max(u.get("best_streak", 0), u["streak"])
+        u["Серия дней подряд"] = u.get("Серия дней подряд", 0) + 1
+        u["best_Серия дней подряд"] = max(u.get("best_Серия дней подряд", 0), u["Серия дней подряд"])
         u["last_goal_day"] = today_str()
 
     # общий счёт
@@ -856,7 +856,7 @@ if __name__ == "__main__":
         types.BotCommand("stats", "Статистика"),
         types.BotCommand("achievements", "Достижения"),
         types.BotCommand("top_done", "Топ ответов"),
-        types.BotCommand("top_streak", "Топ стрика"),
+        types.BotCommand("top_Серия дней подряд", "Топ стрика"),
         types.BotCommand("goal", "Цель на день"),
         types.BotCommand("reset_topic", "Сброс темы"),
         types.BotCommand("reset", "Полный сброс"),
