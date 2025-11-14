@@ -693,7 +693,12 @@ async def send_practicum_card(chat_id: int, direction: str = "stay", message_obj
 
     card = practicum_cards[idx]
     title = card.get("title", "Практикум")
-    body = card.get("content", "")
+
+    if "data" in card:
+        body = "\n".join([f"{k}: {v}" for k, v in card["data"].items()])
+    else:
+        body = card.get("content", "")
+
     footer = f"\n\n📚 Карточка {idx + 1} из {total}"
     text = f"{title}\n\n{body}{footer}".strip()
 
@@ -702,8 +707,9 @@ async def send_practicum_card(chat_id: int, direction: str = "stay", message_obj
         types.InlineKeyboardButton("⬅️ Назад", callback_data="practicum:prev"),
         types.InlineKeyboardButton("⏭ Далее", callback_data="practicum:next")
     )
-    
-    parts = split_text(text, 3500) # <--- Разбиваем текст
+
+    parts = split_text(text, 3500)  # <--- Разбиваем текст
+
 
     # Если это короткое сообщение (одна часть) и есть что редактировать:
     if message_obj is not None and len(parts) == 1:
