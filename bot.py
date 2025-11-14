@@ -541,17 +541,22 @@ async def nejm_command(message: types.Message):
         f"📦 Всего кейсов: {TOTAL_NEJM}.\n\n"
         "Нажми «Начать», чтобы получить случай (картинки без подписей)."
     )
-    kb = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⏭ Начать", callback_data="nejm:next"))
+    kb = types.InlineKeyboardMarkup().add(
+        types.InlineKeyboardButton("⏭ Начать", callback_data="nejm:next")
+    )
     await message.answer(intro, reply_markup=kb)
+
 
 async def send_nejm_case(chat_id: int, *, notify_reset: bool = False):
     uid = str(chat_id)
     user = ensure_user(uid)
     state = user.setdefault("nejm", {"queue": [], "answered": 0, "current": None})
     queue = ensure_nejm_queue(state)
+
     if not nejm_cases:
         await bot.send_message(chat_id, "Пока нет кейсов NEJM. Добавь их в nejm_cases.json.")
         return
+
     if not queue:
         state["answered"] = 0
         queue = ensure_nejm_queue(state)
@@ -559,10 +564,20 @@ async def send_nejm_case(chat_id: int, *, notify_reset: bool = False):
 
     case_id = queue.pop(0)
     case = get_nejm_case(case_id)
+
     if not case:
         await bot.send_message(chat_id, "Не удалось получить клинический кейс. Попробуй ещё раз позже.")
         save_progress(progress)
         return
+
+    # === Отправляем изображение, если оно указано ===
+    if "image" in case and case["image"]:
+        try:
+            img_path = (BASE_DIR / case["image"]).resolve()
+            if img_path.exists():
+                await bot.send_photo(chat_id, InputFile(str(img_path)))
+        except Exception as e:
+            print(f"Ошибка при отправке изображения NEJM: {e}")
 
     state["current"] = int(case_id)
     ordinal = (state.get("answered", 0) % max(1, TOTAL_NEJM)) + 1
@@ -570,14 +585,19 @@ async def send_nejm_case(chat_id: int, *, notify_reset: bool = False):
     text = f"{header}\n\n{case['question']}\n\n" + "\n".join(
         f"{idx + 1}) {opt}" for idx, opt in enumerate(case.get("options", []))
     )
-    # картинки (без подписей)
+
+    # картинки (дополнительные, если несколько)
     images = gather_images(case)
     if images:
         await send_images(chat_id, images)
 
     kb = types.InlineKeyboardMarkup(row_width=2)
     for idx in range(len(case.get("options", []))):
-        kb.insert(types.InlineKeyboardButton(str(idx + 1), callback_data=f"nejm:answer:{case_id}:{idx+1}"))
+        kb.insert(
+            types.InlineKeyboardButton(
+                str(idx + 1), callback_data=f"nejm:answer:{case_id}:{idx + 1}"
+            )
+        )
 
     parts = split_text(text, 3500) or [text]
     for i, part in enumerate(parts):
@@ -591,12 +611,14 @@ async def send_nejm_case(chat_id: int, *, notify_reset: bool = False):
 
     save_progress(progress)
 
+
 @dp.callback_query_handler(lambda c: c.data.startswith("nejm:"))
 async def callback_nejm(call: types.CallbackQuery):
     parts = call.data.split(":")
     if len(parts) < 2:
         await call.answer()
         return
+
     action = parts[1]
     uid = str(call.message.chat.id)
     user = ensure_user(uid)
@@ -604,7 +626,6 @@ async def callback_nejm(call: types.CallbackQuery):
 
     if action == "next":
         try:
-            # Удаляем клавиатуру из текущего сообщения перед отправкой нового
             await call.message.edit_reply_markup()
         except Exception:
             pass
@@ -643,17 +664,17 @@ async def callback_nejm(call: types.CallbackQuery):
         except Exception:
             pass
 
-        kb = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⏭ Далее", callback_data="nejm:next"))
-        
+        kb = types.InlineKeyboardMarkup().add(
+            types.InlineKeyboardButton("⏭ Далее", callback_data="nejm:next")
+        )
+
         await call.answer("Верно" if is_correct else "Неверно")
-        
-        # Разбиваем ответ, чтобы избежать Message too long
+
         parts = split_text(reply, 3000)
         for idx, part in enumerate(parts):
-            # Клавиатура прикрепляется ТОЛЬКО к последней части
             reply_markup = kb if idx == len(parts) - 1 else None
             await bot.send_message(uid, part, reply_markup=reply_markup)
-        
+
         return
 
     await call.answer()
