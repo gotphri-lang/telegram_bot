@@ -46,8 +46,73 @@ def save_progress(progress):
         json.dump(progress, f, ensure_ascii=False, indent=2)
 
 def split_text(text, limit=3500):
-    """Разбивает текст на части по лимиту, подходящему для Telegram."""
-    return [text[i:i + limit] for i in range(0, len(text), limit)]
+    """Разбивает текст на части, стараясь сохранять абзацы."""
+    if not text:
+        return [""]
+
+    text = text.strip()
+    if len(text) <= limit:
+        return [text]
+
+    parts: List[str] = []
+    current = ""
+
+    def flush_current():
+        nonlocal current
+        if current:
+            parts.append(current)
+            current = ""
+
+    paragraphs = [p.strip() for p in text.split("\n\n")]
+    for para in paragraphs:
+        if not para:
+            continue
+        candidate = f"{current}\n\n{para}".strip() if current else para
+        if len(candidate) <= limit:
+            current = candidate
+            continue
+
+        flush_current()
+
+        if len(para) <= limit:
+            current = para
+            continue
+
+        # Абзац слишком длинный — делим его по лимиту
+        for i in range(0, len(para), limit):
+            chunk = para[i:i + limit]
+            if len(chunk) == limit:
+                parts.append(chunk)
+            else:
+                current = chunk
+
+    flush_current()
+    return parts or [text]
+
+
+def prettify_label(label: str) -> str:
+    text = str(label or "").strip().replace("_", " ").replace("-", " ")
+    text = " ".join(text.split())
+    if text:
+        text = text[0].upper() + text[1:]
+    return text
+
+
+def format_practicum_body(card: dict) -> str:
+    data = card.get("data")
+    if isinstance(data, dict):
+        sections = []
+        for key, value in data.items():
+            content = str(value).strip()
+            if not content:
+                continue
+            label = prettify_label(key)
+            if label:
+                sections.append(f"{label}:\n{content}")
+            else:
+                sections.append(content)
+        return "\n\n".join(sections).strip()
+    return str(card.get("content", "")).strip()
 
 def gather_images(obj: dict) -> List[str]:
     """
@@ -715,10 +780,7 @@ async def send_practicum_card(chat_id: int, direction: str = "stay", message_obj
     card = practicum_cards[idx]
     title = card.get("title", "Практикум")
 
-    if "data" in card:
-        body = "\n".join([f"{k}: {v}" for k, v in card["data"].items()])
-    else:
-        body = card.get("content", "")
+    body = format_practicum_body(card)
 
     footer = f"\n\n📚 Карточка {idx + 1} из {total}"
     text = f"{title}\n\n{body}{footer}".strip()
