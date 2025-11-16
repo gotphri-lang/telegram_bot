@@ -831,6 +831,73 @@ async def callback_practicum(call: types.CallbackQuery):
     elif action == "prev":
         await send_practicum_card(call.message.chat.id, direction="prev", message_obj=call.message)
 
+
+# ======================
+# CALLBACK: ответы по NEJM
+# ======================
+@dp.callback_query_handler(lambda c: c.data.startswith("nejm:answer:"))
+async def handle_nejm_answer(callback_query: types.CallbackQuery):
+    await callback_query.answer()
+
+    parts = callback_query.data.split(":", maxsplit=3)
+    if len(parts) != 4:
+        return
+
+    _, _, case_id_raw, opt_raw = parts
+    try:
+        case_id = int(case_id_raw)
+        chosen_idx = int(opt_raw) - 1
+    except Exception:
+        return
+
+    case = get_nejm_case(case_id)
+    if not case:
+        return
+
+    uid = str(callback_query.from_user.id)
+    user = ensure_user(uid)
+    state = user.setdefault("nejm", {"queue": [], "answered": 0, "current": None})
+
+    correct_idx = int(case.get("correct_index", 0))
+    correct = chosen_idx == correct_idx
+
+    state["answered"] = state.get("answered", 0) + 1
+    state["current"] = None
+    save_progress(progress)
+
+    status = "✅ Верно!" if correct else "❌ Неверно."
+    explanation = case.get("explanation", "").strip()
+
+    reply_lines = [status]
+    if not correct:
+        options = case.get("options", [])
+        if 0 <= correct_idx < len(options):
+            reply_lines.append(f"Правильный ответ: {options[correct_idx]}")
+    if explanation:
+        reply_lines.extend(["", explanation])
+
+    parts_reply = split_text("\n".join(reply_lines), 3000)
+
+    # Удаляем старую клавиатуру, чтобы исключить повторные нажатия
+    try:
+        await callback_query.message.edit_reply_markup()
+    except Exception:
+        pass
+
+    kb = types.InlineKeyboardMarkup().add(
+        types.InlineKeyboardButton("⏭ Далее", callback_data="nejm:next")
+    )
+
+    for idx, part in enumerate(parts_reply):
+        reply_markup = kb if idx == len(parts_reply) - 1 else None
+        await bot.send_message(uid, part, reply_markup=reply_markup)
+
+
+@dp.callback_query_handler(lambda c: c.data == "nejm:next")
+async def handle_nejm_next(callback_query: types.CallbackQuery):
+    await callback_query.answer()
+    await send_nejm_case(callback_query.from_user.id)
+
 # ======================
 # CALLBACK: ответы по обычным вопросам
 # ======================
