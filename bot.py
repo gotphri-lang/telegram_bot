@@ -465,6 +465,20 @@ async def send_images(chat_id: int, sources: List[str]):
         except Exception as exc:
             print(f"⚠️ image send failed: {src} — {exc}")
 
+
+async def send_first_image(chat_id: int, sources: List[str]):
+    """Отправляет первое доступное изображение из списка."""
+    for src in sources:
+        resolved = resolve_image_source(src)
+        if not resolved:
+            continue
+        try:
+            await bot.send_photo(chat_id, resolved)
+            return True
+        except Exception as exc:
+            print(f"⚠️ image send failed: {src} — {exc}")
+    return False
+
 async def send_question(chat_id: int, topic_filter: Optional[str] = None):
     uid = str(chat_id)
     u = ensure_user(uid)
@@ -718,7 +732,11 @@ async def send_nejm_case(chat_id: int, *, notify_reset: bool = False):
     # Всегда показываем ровно одно изображение: берём первое из доступных.
     images = gather_images(case)
     if images:
+<<<<<<< ours
         await send_images(chat_id, images[:1])
+=======
+        await send_first_image(chat_id, images)
+>>>>>>> theirs
 
     kb = types.InlineKeyboardMarkup(row_width=2)
     for idx in range(len(case.get("options", []))):
