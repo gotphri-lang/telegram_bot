@@ -98,21 +98,94 @@ def prettify_label(label: str) -> str:
     return text
 
 
+PRACTICUM_SECTION_ICONS = (
+    ("правило", "📏"),
+    ("проблем", "⚠️"),
+    ("рекомендац", "📝"),
+    ("тактик", "🛠"),
+    ("направлен", "➡️"),
+    ("чтовидим", "👀"),
+    ("чтознаем", "💡"),
+    ("чтообъясняем", "💬"),
+    ("чтоделаем", "🧭"),
+    ("контрол", "🕒"),
+    ("возраст", "🎯"),
+    ("орт", "🦴"),
+    ("стоп", "🦶"),
+    ("колен", "🦵"),
+    ("рентген", "🩻"),
+)
+
+PRACTICUM_BULLET_SIGNS = ("•", "-", "—", "▪", "▫", "►")
+
+
+def _normalize_practicum_label(label: str) -> str:
+    return "".join(ch for ch in label.lower() if ch.isalnum())
+
+
+def pick_practicum_icon(label: str) -> str:
+    normalized = _normalize_practicum_label(label)
+    for keyword, icon in PRACTICUM_SECTION_ICONS:
+        if keyword in normalized:
+            return icon
+    return "🔹"
+
+
+def stylize_practicum_paragraph(paragraph: str) -> str:
+    for mark in PRACTICUM_BULLET_SIGNS:
+        if paragraph.startswith(mark):
+            content = paragraph[len(mark):].strip()
+            return f"{mark} {content}".strip()
+    return f"• {paragraph}".strip()
+
+
+def format_practicum_content(raw: str) -> str:
+    if not raw:
+        return ""
+
+    lines = raw.replace("\r", "").split("\n")
+    paragraphs: List[str] = []
+    current: List[str] = []
+
+    def flush_current():
+        nonlocal current
+        if current:
+            paragraphs.append(" ".join(current).strip())
+            current = []
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            flush_current()
+            continue
+        if stripped.startswith(PRACTICUM_BULLET_SIGNS):
+            flush_current()
+            paragraphs.append(stripped)
+            continue
+        current.append(stripped)
+
+    flush_current()
+
+    formatted = [stylize_practicum_paragraph(p) for p in paragraphs if p]
+    return "\n\n".join(formatted).strip()
+
+
 def format_practicum_body(card: dict) -> str:
     data = card.get("data")
     if isinstance(data, dict):
         sections = []
         for key, value in data.items():
-            content = str(value).strip()
+            content = format_practicum_content(str(value).strip())
             if not content:
                 continue
             label = prettify_label(key)
-            if label:
-                sections.append(f"{label}:\n{content}")
-            else:
-                sections.append(content)
+            icon = pick_practicum_icon(label) if label else "🔹"
+            header = f"{icon} {label}".strip()
+            sections.append(f"{header}\n{content}")
         return "\n\n".join(sections).strip()
-    return str(card.get("content", "")).strip()
+
+    content = str(card.get("content", "")).strip()
+    return format_practicum_content(content)
 
 def gather_images(obj: dict) -> List[str]:
     """
@@ -215,7 +288,7 @@ async def start(message: types.Message):
         "💡 Ошибки — завтра, верные — через 2, 4, 8... дней.\n\n"
         f"📚 Разделы:\n🧠 PediaMed – {TOTAL_QUESTIONS}\n"
         f"🩺 NEJM – {TOTAL_NEJM}\n"
-        f"🛠 PediaPracticum – {TOTAL_PRACTICUM}\n\n"
+        f"🛠 Practicum – {TOTAL_PRACTICUM}\n\n"
         "Смотри /help для всех команд.",
         reply_markup=kb,
     )
@@ -232,7 +305,7 @@ async def help_cmd(message: types.Message):
         "/goal N – задать дневную цель\n"
         "/achievements – достижения\n"
         "/nejm – клинические кейсы NEJM\n"
-        "/practicum – практикум по педиатрии\n"
+        "/practicum – Practicum по педиатрии\n"
         "/reset – сбросить всё\n"
         "/reset_topic – сбросить по теме\n"
         "/top_done – топ по ответам\n"
@@ -750,10 +823,10 @@ async def callback_nejm(call: types.CallbackQuery):
 @dp.message_handler(commands=["practicum"])
 async def practicum_command(message: types.Message):
     if not practicum_cards:
-        await message.answer("Практикум пока пуст. Добавь карточки в practicum.json.")
+        await message.answer("Practicum пока пуст. Добавь карточки в practicum.json.")
         return
     intro = (
-        "🛠 Практикум по педиатрии\n\n"
+        "🛠 Practicum по педиатрии\n\n"
         f"📦 Всего карточек: {TOTAL_PRACTICUM}.\n\n"
         "Нажми «Открыть», чтобы просмотреть первую карточку."
     )
@@ -766,7 +839,7 @@ async def send_practicum_card(chat_id: int, direction: str = "stay", message_obj
     user = ensure_user(uid)
     state = user.setdefault("practicum", {"index": 0})
     if not practicum_cards:
-        await bot.send_message(chat_id, "Практикум пока пуст. Добавь карточки в practicum.json.")
+        await bot.send_message(chat_id, "Practicum пока пуст. Добавь карточки в practicum.json.")
         return
 
     total = TOTAL_PRACTICUM
@@ -778,7 +851,7 @@ async def send_practicum_card(chat_id: int, direction: str = "stay", message_obj
     state["index"] = idx
 
     card = practicum_cards[idx]
-    title = card.get("title", "Практикум")
+    title = card.get("title", "Practicum")
 
     body = format_practicum_body(card)
 
@@ -951,6 +1024,6 @@ if __name__ == "__main__":
         types.BotCommand("reset_topic", "Сброс темы"),
         types.BotCommand("reset", "Полный сброс"),
         types.BotCommand("nejm", "NEJM кейсы"),
-        types.BotCommand("practicum", "Практикум"),
+        types.BotCommand("practicum", "Practicum"),
     ]))
     executor.start_polling(dp, skip_updates=True)
