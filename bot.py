@@ -312,6 +312,16 @@ async def help_cmd(message: types.Message):
         "/users – все пользователи (админ)"
     )
 
+
+@dp.message_handler(commands=["nejm"])
+async def nejm_cmd(message: types.Message):
+    await send_nejm_case(message.chat.id)
+
+
+@dp.message_handler(commands=["practicum"])
+async def practicum_cmd(message: types.Message):
+    await send_practicum_card(message.chat.id)
+
 @dp.message_handler(commands=["stats"])
 async def stats(message: types.Message):
     uid = str(message.chat.id)
