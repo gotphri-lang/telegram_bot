@@ -285,10 +285,10 @@ async def start(message: types.Message):
     await message.answer(
         f"👋 Привет, {uname}!\n\n"
         "Этот бот помогает учить педиатрию с интервальным повторением.\n\n"
-        "💡 Ошибки — завтра, верные — через 2, 4, 8... дней.\n\n"
-        f"📚 Разделы:\n🧠 PediaMed – {TOTAL_QUESTIONS}\n"
-        f"🩺 NEJM – {TOTAL_NEJM}\n"
-        f"🛠 Practicum – {TOTAL_PRACTICUM}\n\n"
+        "💡 Ошибки - завтра, верные - через 2, 4, 8... дней.\n\n"
+        f"📚 Разделы:\n🧠 PediaMed - {TOTAL_QUESTIONS}\n"
+        f"🩺 NEJM - {TOTAL_NEJM}\n"
+        f"🛠 Practicum - {TOTAL_PRACTICUM}\n\n"
         "Смотри /help для всех команд.",
         reply_markup=kb,
     )
