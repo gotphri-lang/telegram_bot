@@ -680,25 +680,6 @@ async def reset_all(message: types.Message):
     save_progress(progress)
     await message.answer("🔄 Полный сброс. Начинай с /start или /train.")
 
-# ======================
-# NEJM
-# ======================
-@dp.message_handler(commands=["nejm"])
-async def nejm_command(message: types.Message):
-    if not nejm_cases:
-        await message.answer("Пока нет кейсов NEJM. Добавь их в nejm_cases.json.")
-        return
-    intro = (
-        "🩺 NEJM Clinical Cases\n\n"
-        f"📦 Всего кейсов: {TOTAL_NEJM}.\n\n"
-        "Нажми «Начать», чтобы получить случай (картинки без подписей)."
-    )
-    kb = types.InlineKeyboardMarkup().add(
-        types.InlineKeyboardButton("⏭ Начать", callback_data="nejm:next")
-    )
-    await message.answer(intro, reply_markup=kb)
-
-
 async def send_nejm_case(chat_id: int, *, notify_reset: bool = False):
     uid = str(chat_id)
     user = ensure_user(uid)
@@ -718,31 +699,32 @@ async def send_nejm_case(chat_id: int, *, notify_reset: bool = False):
     case = get_nejm_case(case_id)
 
     if not case:
-        await bot.send_message(chat_id, "Не удалось получить клинический кейс. Попробуй ещё раз позже.")
+        await bot.send_message(
+            chat_id,
+            "Не удалось получить клинический кейс. Попробуй ещё раз позже."
+        )
         save_progress(progress)
         return
 
     state["current"] = int(case_id)
     ordinal = (state.get("answered", 0) % max(1, TOTAL_NEJM)) + 1
     header = f"🩺 NEJM Case {ordinal}/{TOTAL_NEJM}"
-    text = f"{header}\n\n{case['question']}\n\n" + "\n".join(
-        f"{idx + 1}) {opt}" for idx, opt in enumerate(case.get("options", []))
+    text = (
+        f"{header}\n\n{case['question']}\n\n"
+        + "\n".join(f"{idx + 1}) {opt}" for idx, opt in enumerate(case.get("options", [])))
     )
 
     # Всегда показываем ровно одно изображение: берём первое из доступных.
     images = gather_images(case)
     if images:
-<<<<<<< ours
-        await send_images(chat_id, images[:1])
-=======
         await send_first_image(chat_id, images)
->>>>>>> theirs
 
     kb = types.InlineKeyboardMarkup(row_width=2)
     for idx in range(len(case.get("options", []))):
         kb.insert(
             types.InlineKeyboardButton(
-                str(idx + 1), callback_data=f"nejm:answer:{case_id}:{idx + 1}"
+                str(idx + 1),
+                callback_data=f"nejm:answer:{case_id}:{idx + 1}"
             )
         )
 
@@ -754,93 +736,13 @@ async def send_nejm_case(chat_id: int, *, notify_reset: bool = False):
             await bot.send_message(chat_id, part)
 
     if notify_reset:
-        await bot.send_message(chat_id, "Ты прошёл все кейсы — последовательность обновлена. ✅")
+        await bot.send_message(
+            chat_id,
+            "Ты прошёл все кейсы — последовательность обновлена. ✅"
+        )
 
     save_progress(progress)
 
-
-@dp.callback_query_handler(lambda c: c.data.startswith("nejm:"))
-async def callback_nejm(call: types.CallbackQuery):
-    parts = call.data.split(":")
-    if len(parts) < 2:
-        await call.answer()
-        return
-
-    action = parts[1]
-    uid = str(call.message.chat.id)
-    user = ensure_user(uid)
-    state = user.setdefault("nejm", {"queue": [], "answered": 0, "current": None})
-
-    if action == "next":
-        try:
-            await call.message.edit_reply_markup()
-        except Exception:
-            pass
-        await call.answer()
-        await send_nejm_case(call.message.chat.id)
-        return
-
-    if action == "answer" and len(parts) == 4:
-        try:
-            case_id = int(parts[2])
-            answer_idx = int(parts[3]) - 1
-        except ValueError:
-            await call.answer("Ошибка ответа", show_alert=True)
-            return
-
-        case = get_nejm_case(case_id)
-        if not case:
-            await call.answer("Кейс не найден", show_alert=True)
-            return
-
-        correct_index = int(case.get("correct_index", 0))
-        is_correct = answer_idx == correct_index
-        state["answered"] = state.get("answered", 0) + 1
-        save_progress(progress)
-
-        options = case.get("options", [])
-        correct_option = options[correct_index] if 0 <= correct_index < len(options) else "—"
-        status = "✅ Верно!" if is_correct else "❌ Неверно."
-        reply = f"{status}\n\nПравильный ответ: {correct_option}"
-        explanation = case.get("explanation")
-        if explanation:
-            reply += f"\n\n{explanation}"
-
-        try:
-            await call.message.edit_reply_markup()
-        except Exception:
-            pass
-
-        kb = types.InlineKeyboardMarkup().add(
-            types.InlineKeyboardButton("⏭ Далее", callback_data="nejm:next")
-        )
-
-        await call.answer("Верно" if is_correct else "Неверно")
-
-        parts = split_text(reply, 3000)
-        for idx, part in enumerate(parts):
-            reply_markup = kb if idx == len(parts) - 1 else None
-            await bot.send_message(uid, part, reply_markup=reply_markup)
-
-        return
-
-    await call.answer()
-
-# ======================
-# PRACTICUM
-# ======================
-@dp.message_handler(commands=["practicum"])
-async def practicum_command(message: types.Message):
-    if not practicum_cards:
-        await message.answer("Practicum пока пуст. Добавь карточки в practicum.json.")
-        return
-    intro = (
-        "🛠 Practicum по педиатрии\n\n"
-        f"📦 Всего карточек: {TOTAL_PRACTICUM}.\n\n"
-        "Нажми «Открыть», чтобы просмотреть первую карточку."
-    )
-    kb = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("📖 Открыть", callback_data="practicum:open"))
-    await message.answer(intro, reply_markup=kb)
 
 # ИСПРАВЛЕННАЯ ФУНКЦИЯ ДЛЯ КОРРЕКТНОЙ ОБРАБОТКИ ДЛИННОГО ТЕКСТА
 async def send_practicum_card(chat_id: int, direction: str = "stay", message_obj: Optional[types.Message] = None):
