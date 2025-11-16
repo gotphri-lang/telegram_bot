@@ -210,6 +210,22 @@ def gather_images(obj: dict) -> List[str]:
 
     return out
 
+def _find_existing_image_variant(path: Path) -> Optional[Path]:
+    """Ищем файл с другой частой картинкой (например, .jpeg вместо .jpg)."""
+
+    suffix = path.suffix.lower()
+    stems = [suffix] if suffix else []
+    alternatives = [".jpeg", ".jpg", ".png"]
+
+    for alt_ext in alternatives:
+        if alt_ext in stems:
+            continue
+        candidate = path.with_suffix(alt_ext)
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def resolve_image_source(source: str):
     if not source:
         return None
@@ -219,6 +235,11 @@ def resolve_image_source(source: str):
     local_path = (BASE_DIR / s).resolve()
     if local_path.exists():
         return InputFile(str(local_path))
+
+    fallback = _find_existing_image_variant(local_path)
+    if fallback:
+        return InputFile(str(fallback))
+
     return s  # пусть телега попробует как URL/путь
 
 progress = load_progress()
@@ -240,7 +261,6 @@ practicum_cards = load_optional_json(PRACTICUM_FILE)
 
 Q_BY_ID = {int(q["id"]): q for q in questions}
 
-# ======= БАЗОВЫЕ ТЕМЫ =======
 TOPICS = [
     "Педиатрия",
     "Неонатология",
@@ -811,6 +831,9 @@ async def callback_practicum(call: types.CallbackQuery):
         await send_practicum_card(call.message.chat.id, direction="prev", message_obj=call.message)
 
 
+
+# CALLBACK: ответы по NEJM
+
 @dp.callback_query_handler(lambda c: c.data.startswith("nejm:answer:"))
 async def handle_nejm_answer(callback_query: types.CallbackQuery):
     await callback_query.answer()
@@ -873,6 +896,9 @@ async def handle_nejm_answer(callback_query: types.CallbackQuery):
 async def handle_nejm_next(callback_query: types.CallbackQuery):
     await callback_query.answer()
     await send_nejm_case(callback_query.from_user.id)
+
+
+# CALLBACK: ответы по обычным вопросам
 
 @dp.callback_query_handler(lambda c: c.data == "next")
 async def next_card(callback_query: types.CallbackQuery):
