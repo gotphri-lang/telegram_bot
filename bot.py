@@ -708,15 +708,6 @@ async def send_nejm_case(chat_id: int, *, notify_reset: bool = False):
         save_progress(progress)
         return
 
-    # === Отправляем изображение, если оно указано ===
-    if "image" in case and case["image"]:
-        try:
-            img_path = (BASE_DIR / case["image"]).resolve()
-            if img_path.exists():
-                await bot.send_photo(chat_id, InputFile(str(img_path)))
-        except Exception as e:
-            print(f"Ошибка при отправке изображения NEJM: {e}")
-
     state["current"] = int(case_id)
     ordinal = (state.get("answered", 0) % max(1, TOTAL_NEJM)) + 1
     header = f"🩺 NEJM Case {ordinal}/{TOTAL_NEJM}"
@@ -724,10 +715,10 @@ async def send_nejm_case(chat_id: int, *, notify_reset: bool = False):
         f"{idx + 1}) {opt}" for idx, opt in enumerate(case.get("options", []))
     )
 
-    # картинки (дополнительные, если несколько)
+    # Всегда показываем ровно одно изображение: берём первое из доступных.
     images = gather_images(case)
     if images:
-        await send_images(chat_id, images)
+        await send_images(chat_id, images[:1])
 
     kb = types.InlineKeyboardMarkup(row_width=2)
     for idx in range(len(case.get("options", []))):
