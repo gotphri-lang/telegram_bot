@@ -6,9 +6,6 @@ from typing import Optional, List, Tuple
 from datetime import datetime, timedelta
 from pathlib import Path
 
-# ======================
-# НАСТРОЙКА
-# ======================
 BOT_TOKEN = "8242848619:AAF2wA3EazZZD38fMHcTjeSNx-D-cDb85HQ"
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
@@ -20,9 +17,6 @@ BASE_DIR = Path(__file__).resolve().parent
 NEJM_FILE = BASE_DIR / "nejm_cases.json"
 PRACTICUM_FILE = BASE_DIR / "practicum.json"
 
-# ======================
-# УТИЛИТЫ
-# ======================
 def today_str():
     return datetime.now().strftime(DATE_FMT)
 
@@ -227,9 +221,6 @@ def resolve_image_source(source: str):
         return InputFile(str(local_path))
     return s  # пусть телега попробует как URL/путь
 
-# ======================
-# ДАННЫЕ
-# ======================
 progress = load_progress()
 
 with open(str(BASE_DIR / "questions.json"), encoding="utf-8") as f:
@@ -268,9 +259,6 @@ TOTAL_QUESTIONS = len(questions)
 TOTAL_NEJM = len(nejm_cases)
 TOTAL_PRACTICUM = len(practicum_cards)
 
-# ======================
-# КОМАНДЫ
-# ======================
 
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
@@ -353,9 +341,6 @@ async def stats(message: types.Message):
     )
     await message.answer(msg)
 
-# ======================
-# ДОСТИЖЕНИЯ / ТОКЕНЫ
-# ======================
 # Стрики (дни подряд)
 STREAK_MILESTONES = [
     (1,   "Старт дан"),
@@ -461,9 +446,6 @@ def get_nejm_case(case_id: int):
             return case
     return None
 
-# ======================
-# ЛОГИКА ВОПРОСОВ
-# ======================
 async def send_images(chat_id: int, sources: List[str]):
     for src in sources:
         resolved = resolve_image_source(src)
@@ -554,9 +536,6 @@ def update_interval(card: dict, correct: bool):
     card["next_review"] = next_day.strftime(DATE_FMT)
     return card
 
-# ======================
-# ДОПОЛНИТЕЛЬНЫЕ КОМАНДЫ
-# ======================
 
 @dp.message_handler(commands=["goal"])
 async def set_goal(message: types.Message):
@@ -832,9 +811,6 @@ async def callback_practicum(call: types.CallbackQuery):
         await send_practicum_card(call.message.chat.id, direction="prev", message_obj=call.message)
 
 
-# ======================
-# CALLBACK: ответы по NEJM
-# ======================
 @dp.callback_query_handler(lambda c: c.data.startswith("nejm:answer:"))
 async def handle_nejm_answer(callback_query: types.CallbackQuery):
     await callback_query.answer()
@@ -898,9 +874,6 @@ async def handle_nejm_next(callback_query: types.CallbackQuery):
     await callback_query.answer()
     await send_nejm_case(callback_query.from_user.id)
 
-# ======================
-# CALLBACK: ответы по обычным вопросам
-# ======================
 @dp.callback_query_handler(lambda c: c.data == "next")
 async def next_card(callback_query: types.CallbackQuery):
     await callback_query.answer()
@@ -985,9 +958,6 @@ async def handle_answer(callback_query: types.CallbackQuery):
         await bot.send_message(uid, part, reply_markup=reply_markup)
 
 
-# ======================
-# ЗАПУСК
-# ======================
 if __name__ == "__main__":
     print("✅ Бот запущен и ждёт сообщений в Telegram...")
 
