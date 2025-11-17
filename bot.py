@@ -16,6 +16,7 @@ ADMIN_ID = 288158839  # твой chat_id
 BASE_DIR = Path(__file__).resolve().parent
 NEJM_FILE = BASE_DIR / "nejm_cases.json"
 PRACTICUM_FILE = BASE_DIR / "practicum.json"
+AMIR_FILE = BASE_DIR / "amir_ru.json"
 
 def today_str():
     return datetime.now().strftime(DATE_FMT)
@@ -258,6 +259,7 @@ def load_optional_json(path: Path):
 
 nejm_cases = load_optional_json(NEJM_FILE)
 practicum_cards = load_optional_json(PRACTICUM_FILE)
+amir_questions = load_optional_json(AMIR_FILE)
 
 Q_BY_ID = {int(q["id"]): q for q in questions}
 
@@ -278,6 +280,7 @@ TOPIC_MAP = {i: t for i, t in enumerate(TOPICS)}
 TOTAL_QUESTIONS = len(questions)
 TOTAL_NEJM = len(nejm_cases)
 TOTAL_PRACTICUM = len(practicum_cards)
+TOTAL_AMIR = len(amir_questions)
 
 
 @dp.message_handler(commands=["start"])
@@ -296,6 +299,7 @@ async def start(message: types.Message):
         "💡 Ошибки - завтра, верные - через 2, 4, 8... дней.\n\n"
         f"📚 Разделы:\n🧠 PediaMed - {TOTAL_QUESTIONS}\n"
         f"🩺 NEJM - {TOTAL_NEJM}\n"
+        f"📘 AMIR - {TOTAL_AMIR}\n"
         f"🛠 Practicum - {TOTAL_PRACTICUM}\n\n"
         "Смотри /help для всех команд.",
         reply_markup=kb,
@@ -313,6 +317,7 @@ async def help_cmd(message: types.Message):
         "/goal N – задать дневную цель\n"
         "/achievements – достижения\n"
         "/nejm – клинические кейсы NEJM\n"
+        "/amir – вопросы AMIR\n"
         "/practicum – Practicum по педиатрии\n"
         "/reset – сбросить всё\n"
         "/reset_topic – сбросить по теме\n"
@@ -324,6 +329,11 @@ async def help_cmd(message: types.Message):
 @dp.message_handler(commands=["nejm"])
 async def nejm_cmd(message: types.Message):
     await send_nejm_case(message.chat.id)
+
+
+@dp.message_handler(commands=["amir"])
+async def amir_cmd(message: types.Message):
+    await send_amir_question(message.chat.id)
 
 
 @dp.message_handler(commands=["practicum"])
@@ -400,6 +410,7 @@ def ensure_user(uid: str, name_hint="Без имени"):
         "tokens": 0,
         "achievements": [],  # список названий
         "nejm": {"queue": [], "answered": 0, "current": None},
+        "amir": {"queue": [], "answered": 0, "current": None},
         "practicum": {"index": 0}
     })
     # новый день — обнуляем done_today
@@ -419,6 +430,7 @@ def ensure_user(uid: str, name_hint="Без имени"):
     u.setdefault("tokens", 0)
     u.setdefault("achievements", [])
     u.setdefault("nejm", {"queue": [], "answered": 0, "current": None})
+    u.setdefault("amir", {"queue": [], "answered": 0, "current": None})
     u.setdefault("practicum", {"index": 0})
     u.setdefault("topics", {})
     u.setdefault("cards", {})
@@ -464,6 +476,24 @@ def get_nejm_case(case_id: int):
     for case in nejm_cases:
         if int(case.get("id", -1)) == int(case_id):
             return case
+    return None
+
+
+def ensure_amir_queue(state: dict):
+    if not amir_questions:
+        return []
+    q = state.get("queue") or []
+    if not q:
+        q = [int(item.get("id")) for item in amir_questions if item.get("id") is not None]
+        random.shuffle(q)
+        state["queue"] = q
+    return q
+
+
+def get_amir_question(question_id: int):
+    for item in amir_questions:
+        if int(item.get("id", -1)) == int(question_id):
+            return item
     return None
 
 async def send_images(chat_id: int, sources: List[str]):
@@ -684,6 +714,7 @@ async def reset_all(message: types.Message):
         "tokens": 0,
         "achievements": [],
         "nejm": {"queue": [], "answered": 0, "current": None},
+        "amir": {"queue": [], "answered": 0, "current": None},
         "practicum": {"index": 0}
     }
     save_progress(progress)
@@ -749,6 +780,57 @@ async def send_nejm_case(chat_id: int, *, notify_reset: bool = False):
             chat_id,
             "Ты прошёл все кейсы — последовательность обновлена. ✅"
         )
+
+    save_progress(progress)
+
+
+async def send_amir_question(chat_id: int, *, notify_reset: bool = False):
+    uid = str(chat_id)
+    user = ensure_user(uid)
+    state = user.setdefault("amir", {"queue": [], "answered": 0, "current": None})
+    queue = ensure_amir_queue(state)
+
+    if not amir_questions:
+        await bot.send_message(chat_id, "Пока нет вопросов AMIR. Добавь их в amir_ru.json.")
+        return
+
+    if not queue:
+        state["answered"] = 0
+        queue = ensure_amir_queue(state)
+        notify_reset = True
+
+    question_id = queue.pop(0)
+    obj = get_amir_question(question_id)
+
+    if not obj:
+        await bot.send_message(chat_id, "Не удалось получить вопрос AMIR. Попробуй ещё раз позже.")
+        save_progress(progress)
+        return
+
+    state["current"] = int(question_id)
+    ordinal = (state.get("answered", 0) % max(1, TOTAL_AMIR)) + 1
+    header = f"📘 AMIR {ordinal}/{TOTAL_AMIR}"
+    text = (
+        f"{header}\n\n{obj['question']}\n\n"
+        + "\n".join(f"{idx + 1}) {opt}" for idx, opt in enumerate(obj.get("options", [])))
+    )
+
+    kb = types.InlineKeyboardMarkup(row_width=2)
+    for idx in range(len(obj.get("options", []))):
+        kb.insert(
+            types.InlineKeyboardButton(
+                str(idx + 1),
+                callback_data=f"amir:answer:{question_id}:{idx + 1}"
+            )
+        )
+
+    parts = split_text(text, 3500) or [text]
+    for i, part in enumerate(parts):
+        reply_markup = kb if i == len(parts) - 1 else None
+        await bot.send_message(chat_id, part, reply_markup=reply_markup)
+
+    if notify_reset:
+        await bot.send_message(chat_id, "Ты прошёл все вопросы AMIR — последовательность обновлена. ✅")
 
     save_progress(progress)
 
@@ -898,6 +980,69 @@ async def handle_nejm_next(callback_query: types.CallbackQuery):
     await send_nejm_case(callback_query.from_user.id)
 
 
+@dp.callback_query_handler(lambda c: c.data.startswith("amir:answer:"))
+async def handle_amir_answer(callback_query: types.CallbackQuery):
+    await callback_query.answer()
+
+    parts = callback_query.data.split(":", maxsplit=3)
+    if len(parts) != 4:
+        return
+
+    _, _, qid_raw, opt_raw = parts
+    try:
+        question_id = int(qid_raw)
+        chosen_idx = int(opt_raw) - 1
+    except Exception:
+        return
+
+    obj = get_amir_question(question_id)
+    if not obj:
+        return
+
+    uid = str(callback_query.from_user.id)
+    user = ensure_user(uid)
+    state = user.setdefault("amir", {"queue": [], "answered": 0, "current": None})
+
+    correct_idx = int(obj.get("correct_index", 0))
+    correct = chosen_idx == correct_idx
+
+    state["answered"] = state.get("answered", 0) + 1
+    state["current"] = None
+    save_progress(progress)
+
+    status = "✅ Верно!" if correct else "❌ Неверно."
+    explanation = obj.get("explanation", "").strip()
+
+    reply_lines = [status]
+    if not correct:
+        options = obj.get("options", [])
+        if 0 <= correct_idx < len(options):
+            reply_lines.append(f"Правильный ответ: {options[correct_idx]}")
+    if explanation:
+        reply_lines.extend(["", explanation])
+
+    parts_reply = split_text("\n".join(reply_lines), 3000)
+
+    try:
+        await callback_query.message.edit_reply_markup()
+    except Exception:
+        pass
+
+    kb = types.InlineKeyboardMarkup().add(
+        types.InlineKeyboardButton("⏭ Далее", callback_data="amir:next")
+    )
+
+    for idx, part in enumerate(parts_reply):
+        reply_markup = kb if idx == len(parts_reply) - 1 else None
+        await bot.send_message(uid, part, reply_markup=reply_markup)
+
+
+@dp.callback_query_handler(lambda c: c.data == "amir:next")
+async def handle_amir_next(callback_query: types.CallbackQuery):
+    await callback_query.answer()
+    await send_amir_question(callback_query.from_user.id)
+
+
 # CALLBACK: ответы по обычным вопросам
 
 @dp.callback_query_handler(lambda c: c.data == "next")
@@ -1008,6 +1153,7 @@ if __name__ == "__main__":
         types.BotCommand("reset_topic", "Сброс темы"),
         types.BotCommand("reset", "Полный сброс"),
         types.BotCommand("nejm", "NEJM кейсы"),
+        types.BotCommand("amir", "Вопросы AMIR"),
         types.BotCommand("practicum", "Practicum"),
     ]))
     executor.start_polling(dp, skip_updates=True)
