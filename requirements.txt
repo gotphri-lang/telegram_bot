@@ -3,5 +3,8 @@ aiohttp==3.8.6
 requests==2.31.0
 python-dotenv==1.0.0
 Flask==3.0.3
+<<<<<<< ours
 PyPDF2==3.0.1
+=======
+>>>>>>> theirs
 openai==1.35.3
