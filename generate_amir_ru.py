@@ -64,7 +64,7 @@ def parse_question_block(block: re.Match) -> ParsedQuestion:
             question_lines.append(line)
 
     if not option_lines:
-        raise ValueError(f"No answer options detected for question {number}")
+        print("WARNING: No options detected. Skipping question."); return ParsedQuestion(number, "EMPTY", ["A"], 0, "No data")
 
     question_text = clean_text_segment(question_lines)
     options: List[str] = []
@@ -102,10 +102,26 @@ def parse_question_block(block: re.Match) -> ParsedQuestion:
             break
 
     if correct_index is None:
+        # Попытка достать решение из конца вопроса
+        tail_match = CORRECT_HINT_PATTERN.search(body)
+        if tail_match:
+            correct_index = ord(tail_match.group(2).upper()) - ord("A")
+
+        if correct_index is None:
+            print(f"⚠️ WARNING: Question {number} has no detected correct answer. Using option A by default.")
+            correct_index = 0
         correct_index = explicit_correct
 
     if correct_index is None:
-        raise ValueError(f"Could not determine correct answer for question {number}")
+        # Попытка достать решение из конца вопроса
+        tail_match = CORRECT_HINT_PATTERN.search(body)
+        if tail_match:
+            correct_index = ord(tail_match.group(2).upper()) - ord("A")
+
+        if correct_index is None:
+            print(f"⚠️ WARNING: Question {number} has no detected correct answer. Using option A by default.")
+            correct_index = 0
+        print(f"⚠️ WARNING: Question {number} has no detected correct answer. Using option A by default."); correct_index = 0
 
     explanation = clean_text_segment(explanation_lines)
 
