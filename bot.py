@@ -262,6 +262,7 @@ practicum_cards = load_optional_json(PRACTICUM_FILE)
 amir_questions = load_optional_json(AMIR_FILE)
 
 Q_BY_ID = {int(q["id"]): q for q in questions}
+AMIR_BY_ID = {int(q["id"]): q for q in amir_questions}
 
 TOPICS = [
     "Педиатрия",
@@ -333,7 +334,7 @@ async def nejm_cmd(message: types.Message):
 
 @dp.message_handler(commands=["amir"])
 async def amir_cmd(message: types.Message):
-    await send_amir_question(message.chat.id)
+    await send_amir_question_srs(message.chat.id)
 
 
 @dp.message_handler(commands=["practicum"])
@@ -410,7 +411,6 @@ def ensure_user(uid: str, name_hint="Без имени"):
         "tokens": 0,
         "achievements": [],  # список названий
         "nejm": {"queue": [], "answered": 0, "current": None},
-        "amir": {"queue": [], "answered": 0, "current": None},
         "practicum": {"index": 0}
     })
     # новый день — обнуляем done_today
@@ -430,7 +430,6 @@ def ensure_user(uid: str, name_hint="Без имени"):
     u.setdefault("tokens", 0)
     u.setdefault("achievements", [])
     u.setdefault("nejm", {"queue": [], "answered": 0, "current": None})
-    u.setdefault("amir", {"queue": [], "answered": 0, "current": None})
     u.setdefault("practicum", {"index": 0})
     u.setdefault("topics", {})
     u.setdefault("cards", {})
@@ -476,24 +475,6 @@ def get_nejm_case(case_id: int):
     for case in nejm_cases:
         if int(case.get("id", -1)) == int(case_id):
             return case
-    return None
-
-
-def ensure_amir_queue(state: dict):
-    if not amir_questions:
-        return []
-    q = state.get("queue") or []
-    if not q:
-        q = [int(item.get("id")) for item in amir_questions if item.get("id") is not None]
-        random.shuffle(q)
-        state["queue"] = q
-    return q
-
-
-def get_amir_question(question_id: int):
-    for item in amir_questions:
-        if int(item.get("id", -1)) == int(question_id):
-            return item
     return None
 
 async def send_images(chat_id: int, sources: List[str]):
@@ -714,7 +695,6 @@ async def reset_all(message: types.Message):
         "tokens": 0,
         "achievements": [],
         "nejm": {"queue": [], "answered": 0, "current": None},
-        "amir": {"queue": [], "answered": 0, "current": None},
         "practicum": {"index": 0}
     }
     save_progress(progress)
@@ -785,38 +765,69 @@ async def send_nejm_case(chat_id: int, *, notify_reset: bool = False):
 
 
 async def send_amir_question(chat_id: int, *, notify_reset: bool = False):
+    return await send_amir_question_srs(chat_id)
+
+
+async def send_amir_question_srs(chat_id: int):
     uid = str(chat_id)
     user = ensure_user(uid)
-    state = user.setdefault("amir", {"queue": [], "answered": 0, "current": None})
-    queue = ensure_amir_queue(state)
+    cards = user.get("cards", {})
 
     if not amir_questions:
         await bot.send_message(chat_id, "Пока нет вопросов AMIR. Добавь их в amir_ru.json.")
         return
 
-    if not queue:
-        state["answered"] = 0
-        queue = ensure_amir_queue(state)
-        notify_reset = True
+    due_ids = []
+    for qid_str, meta in cards.items():
+        try:
+            qid = int(qid_str)
+        except Exception:
+            continue
+        if qid not in AMIR_BY_ID:
+            continue
+        if is_due(meta.get("next_review")):
+            due_ids.append(qid)
 
-    question_id = queue.pop(0)
-    obj = get_amir_question(question_id)
+    if due_ids:
+        qid = random.choice(due_ids)
+        q = AMIR_BY_ID.get(qid)
+        if not q:
+            await bot.send_message(chat_id, "Не удалось получить вопрос AMIR. Попробуй ещё раз позже.")
+            return
+        return await send_amir_question_text(chat_id, q)
 
-    if not obj:
-        await bot.send_message(chat_id, "Не удалось получить вопрос AMIR. Попробуй ещё раз позже.")
-        save_progress(progress)
+    done_ids = set()
+    for qid_str in cards.keys():
+        try:
+            qid = int(qid_str)
+        except Exception:
+            continue
+        if qid in AMIR_BY_ID:
+            done_ids.add(qid)
+
+    pool_new = [q for q in amir_questions if int(q.get("id")) not in done_ids]
+    if not pool_new:
+        await bot.send_message(chat_id, "🎉 Все вопросы AMIR пройдены или запланированы на повтор.")
         return
 
-    state["current"] = int(question_id)
-    ordinal = (state.get("answered", 0) % max(1, TOTAL_AMIR)) + 1
-    header = f"📘 AMIR {ordinal}/{TOTAL_AMIR}"
+    q = random.choice(pool_new)
+    ordinal = len(done_ids) + 1
+    await send_amir_question_text(chat_id, q, ordinal=ordinal)
+
+
+async def send_amir_question_text(chat_id: int, q: dict, ordinal: Optional[int] = None):
+    question_id = int(q.get("id"))
+    header = "📘 AMIR"
+    if ordinal:
+        header = f"{header} {ordinal}/{TOTAL_AMIR}"
+
     text = (
-        f"{header}\n\n{obj['question']}\n\n"
-        + "\n".join(f"{idx + 1}) {opt}" for idx, opt in enumerate(obj.get("options", [])))
+        f"{header}\n\n{q['question']}\n\n"
+        + "\n".join(f"{idx + 1}) {opt}" for idx, opt in enumerate(q.get("options", [])))
     )
 
     kb = types.InlineKeyboardMarkup(row_width=2)
-    for idx in range(len(obj.get("options", []))):
+    for idx in range(len(q.get("options", []))):
         kb.insert(
             types.InlineKeyboardButton(
                 str(idx + 1),
@@ -828,11 +839,6 @@ async def send_amir_question(chat_id: int, *, notify_reset: bool = False):
     for i, part in enumerate(parts):
         reply_markup = kb if i == len(parts) - 1 else None
         await bot.send_message(chat_id, part, reply_markup=reply_markup)
-
-    if notify_reset:
-        await bot.send_message(chat_id, "Ты прошёл все вопросы AMIR — последовательность обновлена. ✅")
-
-    save_progress(progress)
 
 
 # ИСПРАВЛЕННАЯ ФУНКЦИЯ ДЛЯ КОРРЕКТНОЙ ОБРАБОТКИ ДЛИННОГО ТЕКСТА
@@ -995,19 +1001,44 @@ async def handle_amir_answer(callback_query: types.CallbackQuery):
     except Exception:
         return
 
-    obj = get_amir_question(question_id)
+    obj = AMIR_BY_ID.get(question_id)
     if not obj:
         return
 
     uid = str(callback_query.from_user.id)
     user = ensure_user(uid)
-    state = user.setdefault("amir", {"queue": [], "answered": 0, "current": None})
 
     correct_idx = int(obj.get("correct_index", 0))
     correct = chosen_idx == correct_idx
 
-    state["answered"] = state.get("answered", 0) + 1
-    state["current"] = None
+    cards = user.setdefault("cards", {})
+    qid_str = str(question_id)
+    card = cards.get(qid_str, {"interval": 1, "next_review": today_str()})
+    update_interval(card, correct)
+    cards[qid_str] = card
+
+    topic = obj.get("topic", "AMIR")
+    tdata = user.setdefault("topics", {}).setdefault(topic, {"correct": 0, "total": 0})
+    tdata["total"] += 1
+    if correct:
+        tdata["correct"] += 1
+
+    if user.get("last_day") != today_str():
+        user["done_today"] = 0
+        user["last_day"] = today_str()
+
+    user["done_today"] = user.get("done_today", 0) + 1
+
+    goal = user.get("goal_per_day", 10)
+    if user["done_today"] >= goal and user.get("last_goal_day") != today_str():
+        user["current_streak"] = user.get("current_streak", 0) + 1
+        user["best_streak"] = max(user.get("best_streak", 0), user["current_streak"])
+        user["last_goal_day"] = today_str()
+
+    user["total_answered"] = user.get("total_answered", 0) + 1
+
+    gained = check_awards_after_answer(user)
+
     save_progress(progress)
 
     status = "✅ Верно!" if correct else "❌ Неверно."
@@ -1020,6 +1051,10 @@ async def handle_amir_answer(callback_query: types.CallbackQuery):
             reply_lines.append(f"Правильный ответ: {options[correct_idx]}")
     if explanation:
         reply_lines.extend(["", explanation])
+    if gained:
+        reply_lines.append("")
+        for a in gained:
+            reply_lines.append(f"🎖 Новое достижение: {a} (+{ACH_REWARD_TOKENS} токенов)")
 
     parts_reply = split_text("\n".join(reply_lines), 3000)
 
@@ -1040,7 +1075,7 @@ async def handle_amir_answer(callback_query: types.CallbackQuery):
 @dp.callback_query_handler(lambda c: c.data == "amir:next")
 async def handle_amir_next(callback_query: types.CallbackQuery):
     await callback_query.answer()
-    await send_amir_question(callback_query.from_user.id)
+    await send_amir_question_srs(callback_query.from_user.id)
 
 
 # CALLBACK: ответы по обычным вопросам
