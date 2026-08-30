@@ -20,4 +20,6 @@ jobs:
       - name: Scan tracked files
         run: python scripts/security_check.py
       - name: Check Python syntax
-        run: python -m compileall -q bot.py server.py scripts/security_check.py
+        run: python -m compileall -q bot.py scripts/security_check.py scripts/validate_content.py
+      - name: Validate learning content
+        run: python scripts/validate_content.py
