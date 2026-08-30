@@ -1,19 +1,36 @@
 # -*- coding: utf-8 -*-
 from aiogram import Bot, Dispatcher, executor, types
 from aiogram.types import InputFile
-import json, random, os, asyncio
+from dotenv import load_dotenv
+import asyncio
+import json
+import logging
+import os
+import random
+import threading
 from typing import Optional, List, Tuple
 from datetime import datetime, timedelta
 from pathlib import Path
 
-BOT_TOKEN = "8242848619:AAF2wA3EazZZD38fMHcTjeSNx-D-cDb85HQ"
+BASE_DIR = Path(__file__).resolve().parent
+load_dotenv(BASE_DIR / ".env")
+
+BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
+if not BOT_TOKEN:
+    raise RuntimeError("BOT_TOKEN is not configured. Add it to Render Environment.")
+
+_admin_id = os.getenv("ADMIN_ID", "").strip()
+if not _admin_id.isdigit():
+    raise RuntimeError("ADMIN_ID must contain only the Telegram administrator's numeric ID.")
+ADMIN_ID = int(_admin_id)
+
+DATA_DIR = Path(os.getenv("DATA_DIR", str(BASE_DIR / "data"))).resolve()
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+PROGRESS_FILE = DATA_DIR / "progress.json"
+_PROGRESS_LOCK = threading.RLock()
+
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
-
-PROGRESS_FILE = "progress.json"
-DATE_FMT = "%Y-%m-%d"
-ADMIN_ID = 288158839  # твой chat_id
-BASE_DIR = Path(__file__).resolve().parent
 NEJM_FILE = BASE_DIR / "nejm_cases.json"
 PRACTICUM_FILE = BASE_DIR / "practicum.json"
 AMIR_FILE = BASE_DIR / "amir_ru.json"
@@ -31,14 +48,24 @@ def is_due(date_str: str):
     return datetime.now().date() >= d
 
 def load_progress():
-    if os.path.exists(PROGRESS_FILE):
-        with open(PROGRESS_FILE, encoding="utf-8") as f:
-            return json.load(f)
-    return {}
+    if not PROGRESS_FILE.exists():
+        return {}
+    with _PROGRESS_LOCK:
+        try:
+            with PROGRESS_FILE.open(encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
+        except (OSError, json.JSONDecodeError):
+            logging.exception("Could not load progress data")
+            return {}
 
 def save_progress(progress):
-    with open(PROGRESS_FILE, "w", encoding="utf-8") as f:
-        json.dump(progress, f, ensure_ascii=False, indent=2)
+    temp_file = PROGRESS_FILE.with_suffix(".tmp")
+    payload = json.dumps(progress, ensure_ascii=False, indent=2)
+    with _PROGRESS_LOCK:
+        temp_file.write_text(payload, encoding="utf-8")
+        os.chmod(temp_file, 0o600)
+        os.replace(temp_file, PROGRESS_FILE)
 
 def split_text(text, limit=3500):
     """Разбивает текст на части, стараясь сохранять абзацы."""
@@ -1164,19 +1191,10 @@ async def handle_answer(callback_query: types.CallbackQuery):
         await bot.send_message(uid, part, reply_markup=reply_markup)
 
 
-if __name__ == "__main__":
-    print("✅ Бот запущен и ждёт сообщений в Telegram...")
-
-    # фоновый HTTP-сервер (если используется на хостинге)
-    try:
-        import threading
-        from server import app
-        threading.Thread(target=lambda: app.run(host="0.0.0.0", port=10000), daemon=True).start()
-    except Exception as e:
-        print(f"ℹ️ server.py не запущен: {e}")
-
-    loop = asyncio.get_event_loop()
-    loop.create_task(dp.bot.set_my_commands([
+async def on_startup(_dispatcher):
+    # Remove any stale webhook and queued updates left during the incident.
+    await bot.delete_webhook(drop_pending_updates=True)
+    await bot.set_my_commands([
         types.BotCommand("start", "Начать"),
         types.BotCommand("help", "Помощь"),
         types.BotCommand("train", "Выбор темы"),
@@ -1190,5 +1208,21 @@ if __name__ == "__main__":
         types.BotCommand("nejm", "NEJM кейсы"),
         types.BotCommand("amir", "Вопросы AMIR"),
         types.BotCommand("practicum", "Practicum"),
-    ]))
-    executor.start_polling(dp, skip_updates=True)
+    ])
+
+
+if __name__ == "__main__":
+    print("✅ Бот запущен и ждёт сообщений в Telegram...")
+
+    # Render Web Service health endpoint.
+    try:
+        from server import app
+        port = int(os.getenv("PORT", "10000"))
+        threading.Thread(
+            target=lambda: app.run(host="0.0.0.0", port=port, use_reloader=False),
+            daemon=True,
+        ).start()
+    except Exception:
+        logging.exception("server.py не запущен")
+
+    executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
