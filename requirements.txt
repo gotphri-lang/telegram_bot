@@ -3,3 +3,4 @@ pillow
 requests
 python-dotenv
 uvicorn
+Flask==3.0.3
