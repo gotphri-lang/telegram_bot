@@ -1,0 +1,23 @@
+name: Security checks
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Scan tracked files
+        run: python scripts/security_check.py
+      - name: Check Python syntax
+        run: python -m compileall -q bot.py server.py scripts/security_check.py
