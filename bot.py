@@ -250,19 +250,20 @@ amir_questions = load_optional_json(AMIR_FILE)
 Q_BY_ID = {int(q["id"]): q for q in questions}
 AMIR_BY_ID = {int(q["id"]): q for q in amir_questions}
 
-TOPICS = [
-    "Педиатрия",
-    "Неонатология",
-    "Инфекционные болезни",
-    "Неврология",
-    "Кардиология",
-    "Эндокринология",
-    "Нефрология",
-    "Гастроэнтерология",
-    "Пульмонология",
-    "Ревматология",
-]
-TOPIC_MAP = {i: t for i, t in enumerate(TOPICS)}
+def topic_parts(topic: str) -> List[str]:
+    return [part.strip() for part in str(topic or "").split("/") if part.strip()]
+
+
+def question_matches_topic(question: dict, topic_filter: str) -> bool:
+    return topic_filter in topic_parts(question.get("topic", ""))
+
+
+TOPICS = sorted({
+    parts[0]
+    for question in questions
+    if (parts := topic_parts(question.get("topic", "")))
+})
+TOPIC_MAP = {i: topic for i, topic in enumerate(TOPICS)}
 
 TOTAL_QUESTIONS = len(questions)
 TOTAL_NEJM = len(nejm_cases)
@@ -510,7 +511,7 @@ async def send_question(chat_id: int, topic_filter: Optional[str] = None):
             continue
         if qid not in Q_BY_ID or not is_due(meta.get("next_review")):
             continue
-        if topic_filter and Q_BY_ID[qid].get("topic") != topic_filter:
+        if topic_filter and not question_matches_topic(Q_BY_ID[qid], topic_filter):
             continue
         due_ids.append(qid)
 
@@ -522,7 +523,7 @@ async def send_question(chat_id: int, topic_filter: Optional[str] = None):
     done_ids = {int(k) for k in cards.keys()}
     pool = [q for q in questions if int(q["id"]) not in done_ids]
     if topic_filter:
-        pool = [q for q in pool if q.get("topic") == topic_filter]
+        pool = [q for q in pool if question_matches_topic(q, topic_filter)]
 
     if not pool:
         await bot.send_message(chat_id, "🎉 Все вопросы пройдены или запланированы на повтор.")
@@ -669,7 +670,7 @@ async def do_reset_topic(callback_query: types.CallbackQuery):
         return
     uid = str(callback_query.from_user.id)
     u = ensure_user(uid)
-    to_del = [qid for qid, obj in Q_BY_ID.items() if obj.get("topic") == topic]
+    to_del = [qid for qid, obj in Q_BY_ID.items() if question_matches_topic(obj, topic)]
     for qid in to_del:
         u["cards"].pop(str(qid), None)
     save_progress(progress)
