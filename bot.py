@@ -27,6 +27,7 @@ ADMIN_ID = int(_admin_id)
 DATA_DIR = Path(os.getenv("DATA_DIR", str(BASE_DIR / "data"))).resolve()
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 PROGRESS_FILE = DATA_DIR / "progress.json"
+DATE_FMT = "%Y-%m-%d"
 _PROGRESS_LOCK = threading.RLock()
 
 bot = Bot(token=BOT_TOKEN)
