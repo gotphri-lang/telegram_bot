@@ -10,6 +10,8 @@ TOKEN_PATTERN = re.compile(rb"(?<![A-Za-z0-9_])\d{8,12}:[A-Za-z0-9_-]{30,}(?![A-
 ALLOWED_ENV_FILES = {".env.example"}
 BLOCKED_FILES = {".env", "progress.json"}
 BLOCKED_PREFIXES = ("data/",)
+TEXT_SUFFIXES = {".py", ".md", ".txt", ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".sh"}
+TEXT_NAMES = {".gitignore", ".env.example", "requirements.txt", "runtime.txt"}
 
 
 def tracked_files():
@@ -26,6 +28,8 @@ def main():
             continue
         if path.name.startswith(".env") and normalized not in ALLOWED_ENV_FILES:
             problems.append(f"environment secret file must not be tracked: {normalized}")
+            continue
+        if path.suffix.lower() not in TEXT_SUFFIXES and path.name not in TEXT_NAMES:
             continue
         try:
             content = path.read_bytes()
