@@ -90,7 +90,18 @@ def split_text(text, limit=3500):
 
 
 def prettify_label(label: str) -> str:
-    text = str(label or "").strip().replace("_", " ").replace("-", " ")
+    text = str(label or "").strip().replace("_", " ")
+    text = "".join(
+        char
+        if char != "-" or (
+            index > 0
+            and index + 1 < len(text)
+            and text[index - 1].isdigit()
+            and text[index + 1].isdigit()
+        )
+        else " "
+        for index, char in enumerate(text)
+    )
     text = " ".join(text.split())
     if text:
         text = text[0].upper() + text[1:]
