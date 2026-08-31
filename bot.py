@@ -69,48 +69,24 @@ def save_progress(progress):
         os.replace(temp_file, PROGRESS_FILE)
 
 def split_text(text, limit=3500):
-    """Разбивает текст на части, стараясь сохранять абзацы."""
+    """Разбивает текст на части без разрыва слов, если это возможно."""
     if not text:
         return [""]
 
-    text = text.strip()
-    if len(text) <= limit:
-        return [text]
-
+    remaining = text.strip()
     parts: List[str] = []
-    current = ""
+    while len(remaining) > limit:
+        split_at = remaining.rfind("\n", 0, limit + 1)
+        if split_at < limit // 2:
+            split_at = remaining.rfind(" ", 0, limit + 1)
+        if split_at <= 0:
+            split_at = limit
+        parts.append(remaining[:split_at].rstrip())
+        remaining = remaining[split_at:].lstrip()
 
-    def flush_current():
-        nonlocal current
-        if current:
-            parts.append(current)
-            current = ""
-
-    paragraphs = [p.strip() for p in text.split("\n\n")]
-    for para in paragraphs:
-        if not para:
-            continue
-        candidate = f"{current}\n\n{para}".strip() if current else para
-        if len(candidate) <= limit:
-            current = candidate
-            continue
-
-        flush_current()
-
-        if len(para) <= limit:
-            current = para
-            continue
-
-        # Абзац слишком длинный — делим его по лимиту
-        for i in range(0, len(para), limit):
-            chunk = para[i:i + limit]
-            if len(chunk) == limit:
-                parts.append(chunk)
-            else:
-                current = chunk
-
-    flush_current()
-    return parts or [text]
+    if remaining:
+        parts.append(remaining)
+    return parts or [""]
 
 
 def prettify_label(label: str) -> str:
@@ -139,7 +115,7 @@ PRACTICUM_SECTION_ICONS = (
     ("рентген", "🩻"),
 )
 
-PRACTICUM_BULLET_SIGNS = ("•", "-", "—", "▪", "▫", "►")
+PRACTICUM_BULLET_SIGNS = ("•", "-", "▪", "▫", "►")
 
 
 def _normalize_practicum_label(label: str) -> str:
@@ -155,42 +131,21 @@ def pick_practicum_icon(label: str) -> str:
 
 
 def stylize_practicum_paragraph(paragraph: str) -> str:
+    content = paragraph.strip()
     for mark in PRACTICUM_BULLET_SIGNS:
-        if paragraph.startswith(mark):
-            content = paragraph[len(mark):].strip()
-            return f"{mark} {content}".strip()
-    return f"• {paragraph}".strip()
+        if content.startswith(mark):
+            content = content[len(mark):].strip()
+            break
+    return f"- {content}".strip()
 
 
 def format_practicum_content(raw: str) -> str:
     if not raw:
         return ""
 
-    lines = raw.replace("\r", "").split("\n")
-    paragraphs: List[str] = []
-    current: List[str] = []
-
-    def flush_current():
-        nonlocal current
-        if current:
-            paragraphs.append(" ".join(current).strip())
-            current = []
-
-    for line in lines:
-        stripped = line.strip()
-        if not stripped:
-            flush_current()
-            continue
-        if stripped.startswith(PRACTICUM_BULLET_SIGNS):
-            flush_current()
-            paragraphs.append(stripped)
-            continue
-        current.append(stripped)
-
-    flush_current()
-
-    formatted = [stylize_practicum_paragraph(p) for p in paragraphs if p]
-    return "\n\n".join(formatted).strip()
+    lines = [line.strip() for line in raw.replace("\r", "").split("\n")]
+    formatted = [stylize_practicum_paragraph(line) for line in lines if line]
+    return "\n".join(formatted).strip()
 
 
 def format_practicum_body(card: dict) -> str:
@@ -214,7 +169,7 @@ def gather_images(obj: dict) -> List[str]:
     """
     Поддерживает:
       - "image": "path-or-url"
-      - "images": ["path-or-url", {...}, ...]  (dict может содержать path/url/image/caption — подписи игнорируем)
+      - "images": ["path-or-url", {...}, ...]  (dict может содержать path/url/image/caption - подписи игнорируем)
     Возвращает список источников без подписей.
     """
     seen = set()
@@ -285,26 +240,30 @@ def load_optional_json(path: Path):
             print(f"⚠️ {path.name}: {e}")
     return []
 
-nejm_cases = load_optional_json(NEJM_FILE)
+nejm_cases = [
+    case for case in load_optional_json(NEJM_FILE)
+    if case.get("enabled", True)
+]
 practicum_cards = load_optional_json(PRACTICUM_FILE)
 amir_questions = load_optional_json(AMIR_FILE)
 
 Q_BY_ID = {int(q["id"]): q for q in questions}
 AMIR_BY_ID = {int(q["id"]): q for q in amir_questions}
 
-TOPICS = [
-    "Педиатрия",
-    "Неонатология",
-    "Инфекционные болезни",
-    "Неврология",
-    "Кардиология",
-    "Эндокринология",
-    "Нефрология",
-    "Гастроэнтерология",
-    "Пульмонология",
-    "Ревматология",
-]
-TOPIC_MAP = {i: t for i, t in enumerate(TOPICS)}
+def topic_parts(topic: str) -> List[str]:
+    return [part.strip() for part in str(topic or "").split("/") if part.strip()]
+
+
+def question_matches_topic(question: dict, topic_filter: str) -> bool:
+    return topic_filter in topic_parts(question.get("topic", ""))
+
+
+TOPICS = sorted({
+    parts[0]
+    for question in questions
+    if (parts := topic_parts(question.get("topic", "")))
+})
+TOPIC_MAP = {i: topic for i, topic in enumerate(TOPICS)}
 
 TOTAL_QUESTIONS = len(questions)
 TOTAL_NEJM = len(nejm_cases)
@@ -338,20 +297,20 @@ async def start(message: types.Message):
 async def help_cmd(message: types.Message):
     await message.answer(
         "📘 Доступные команды:\n"
-        "/start – начать обучение\n"
-        "/help – эта справка\n"
-        "/train – выбрать тему\n"
-        "/review – повторить карточки на сегодня\n"
-        "/stats – посмотреть статистику\n"
-        "/goal N – задать дневную цель\n"
-        "/achievements – достижения\n"
-        "/nejm – клинические кейсы NEJM\n"
-        "/amir – вопросы AMIR\n"
-        "/practicum – Practicum по педиатрии\n"
-        "/reset – сбросить всё\n"
-        "/reset_topic – сбросить по теме\n"
-        "/top_done – топ по ответам\n"
-        "/users – все пользователи (админ)"
+        "/start - начать обучение\n"
+        "/help - эта справка\n"
+        "/train - выбрать тему\n"
+        "/review - повторить карточки на сегодня\n"
+        "/stats - посмотреть статистику\n"
+        "/goal N - задать дневную цель\n"
+        "/achievements - достижения\n"
+        "/nejm - клинические кейсы NEJM\n"
+        "/amir - вопросы AMIR\n"
+        "/practicum - Practicum по педиатрии\n"
+        "/reset - сбросить всё\n"
+        "/reset_topic - сбросить по теме\n"
+        "/top_done - топ по ответам\n"
+        "/users - все пользователи (админ)"
     )
 
 
@@ -375,6 +334,8 @@ async def stats(message: types.Message):
     u = ensure_user(uid)
     total = len(u.get("cards", {}))
     due = sum(1 for m in u.get("cards", {}).values() if is_due(m.get("next_review")))
+    amir_total = len(u.get("amir_cards", {}))
+    amir_due = sum(1 for m in u.get("amir_cards", {}).values() if is_due(m.get("next_review")))
     goal = u.get("goal_per_day", 10)
     done = u.get("done_today", 0)
     
@@ -392,8 +353,10 @@ async def stats(message: types.Message):
         f"📊 Сегодня: {done}/{goal}\n"
         # ИЗМЕНЕННАЯ ФРАЗА:
         f"🔥 Дней подряд: {current_streak} (лучший результат: {best_streak})\n"
-        f"📘 Изучено карточек: {total}\n"
-        f"📅 К повтору: {due}\n"
+        f"📘 PediaMed изучено: {total}\n"
+        f"📅 PediaMed к повтору: {due}\n"
+        f"📗 AMIR изучено: {amir_total}\n"
+        f"🗓 AMIR к повтору: {amir_due}\n"
         f"💯 Точность: {acc}%\n"
         f"🪙 Токены: {tokens}\n"
         f"🏅 Достижений: {len(u.get('achievements', []))}"
@@ -427,6 +390,8 @@ def ensure_user(uid: str, name_hint="Без имени"):
         "name": name_hint,
         "cards": {},
         "topics": {},
+        "amir_cards": {},
+        "amir_topics": {},
         # ИСПОЛЬЗУЕМ НОВЫЕ КЛЮЧИ:
         "current_streak": 0, 
         "best_streak": 0,
@@ -441,7 +406,7 @@ def ensure_user(uid: str, name_hint="Без имени"):
         "nejm": {"queue": [], "answered": 0, "current": None},
         "practicum": {"index": 0}
     })
-    # новый день — обнуляем done_today
+    # новый день - обнуляем done_today
     if u.get("last_day") != today_str():
         u["done_today"] = 0
         u["last_day"] = today_str()
@@ -461,6 +426,8 @@ def ensure_user(uid: str, name_hint="Без имени"):
     u.setdefault("practicum", {"index": 0})
     u.setdefault("topics", {})
     u.setdefault("cards", {})
+    u.setdefault("amir_cards", {})
+    u.setdefault("amir_topics", {})
     return u
 
 def award_achievement(u: dict, name: str) -> Optional[str]:
@@ -514,7 +481,7 @@ async def send_images(chat_id: int, sources: List[str]):
             # БЕЗ ПОДПИСЕЙ
             await bot.send_photo(chat_id, resolved)
         except Exception as exc:
-            print(f"⚠️ image send failed: {src} — {exc}")
+            print(f"⚠️ image send failed: {src} - {exc}")
 
 
 async def send_first_image(chat_id: int, sources: List[str]):
@@ -527,7 +494,7 @@ async def send_first_image(chat_id: int, sources: List[str]):
             await bot.send_photo(chat_id, resolved)
             return True
         except Exception as exc:
-            print(f"⚠️ image send failed: {src} — {exc}")
+            print(f"⚠️ image send failed: {src} - {exc}")
     return False
 
 async def send_question(chat_id: int, topic_filter: Optional[str] = None):
@@ -535,14 +502,18 @@ async def send_question(chat_id: int, topic_filter: Optional[str] = None):
     u = ensure_user(uid)
     cards = u.get("cards", {})
 
-    # сначала — due
+    # Сначала показываем вопросы, срок повторения которых уже наступил.
     due_ids = []
     for qid_str, meta in cards.items():
-        if is_due(meta.get("next_review")):
+        try:
             qid = int(qid_str)
-            if topic_filter and Q_BY_ID.get(qid, {}).get("topic") != topic_filter:
-                continue
-            due_ids.append(qid)
+        except (TypeError, ValueError):
+            continue
+        if qid not in Q_BY_ID or not is_due(meta.get("next_review")):
+            continue
+        if topic_filter and not question_matches_topic(Q_BY_ID[qid], topic_filter):
+            continue
+        due_ids.append(qid)
 
     if due_ids:
         qid = random.choice(due_ids)
@@ -552,7 +523,7 @@ async def send_question(chat_id: int, topic_filter: Optional[str] = None):
     done_ids = {int(k) for k in cards.keys()}
     pool = [q for q in questions if int(q["id"]) not in done_ids]
     if topic_filter:
-        pool = [q for q in pool if q.get("topic") == topic_filter]
+        pool = [q for q in pool if question_matches_topic(q, topic_filter)]
 
     if not pool:
         await bot.send_message(chat_id, "🎉 Все вопросы пройдены или запланированы на повтор.")
@@ -580,10 +551,8 @@ async def send_question_text(chat_id: int, q: dict):
     # текст вопроса
     parts = split_text(text, 3500) or [text]
     for idx, part in enumerate(parts):
-        if idx == 0:
-            await bot.send_message(chat_id, part, reply_markup=kb)
-        else:
-            await bot.send_message(chat_id, part)
+        reply_markup = kb if idx == len(parts) - 1 else None
+        await bot.send_message(chat_id, part, reply_markup=reply_markup)
 
 def update_interval(card: dict, correct: bool):
     if correct:
@@ -602,7 +571,7 @@ async def set_goal(message: types.Message):
     u = ensure_user(uid)
     parts = message.text.split()
     if len(parts) < 2 or not parts[1].isdigit():
-        return await message.answer("Формат: /goal 15 — карточек в день.")
+        return await message.answer("Формат: /goal 15 - карточек в день.")
     goal = int(parts[1])
     u["goal_per_day"] = max(1, goal)
     save_progress(progress)
@@ -633,7 +602,10 @@ async def train_topic(callback_query: types.CallbackQuery):
 async def review_today(message: types.Message):
     uid = str(message.chat.id)
     u = ensure_user(uid)
-    due = [int(qid) for qid, meta in u.get("cards", {}).items() if is_due(meta.get("next_review"))]
+    due = [
+        int(qid) for qid, meta in u.get("cards", {}).items()
+        if str(qid).isdigit() and int(qid) in Q_BY_ID and is_due(meta.get("next_review"))
+    ]
     if not due:
         return await message.answer("✅ На сегодня нет карточек к повтору.")
     await message.answer(f"📘 Сегодня к повтору: {len(due)}.")
@@ -674,8 +646,9 @@ async def users_count(message: types.Message):
     try:
         count = len(progress.keys())
         await message.answer(f"👥 Всего пользователей: {count}")
-    except Exception as e:
-        await message.answer(f"⚠️ Ошибка: {e}")
+    except Exception:
+        logging.exception("Could not count users")
+        await message.answer("⚠️ Не удалось получить число пользователей.")
 
 @dp.message_handler(commands=["reset_topic"])
 async def reset_topic(message: types.Message):
@@ -697,7 +670,7 @@ async def do_reset_topic(callback_query: types.CallbackQuery):
         return
     uid = str(callback_query.from_user.id)
     u = ensure_user(uid)
-    to_del = [qid for qid, obj in Q_BY_ID.items() if obj.get("topic") == topic]
+    to_del = [qid for qid, obj in Q_BY_ID.items() if question_matches_topic(obj, topic)]
     for qid in to_del:
         u["cards"].pop(str(qid), None)
     save_progress(progress)
@@ -705,28 +678,35 @@ async def do_reset_topic(callback_query: types.CallbackQuery):
 
 @dp.message_handler(commands=["reset"])
 async def reset_all(message: types.Message):
-    uid = str(message.chat.id)
-    uname = message.from_user.first_name or "Без имени"
-    progress[uid] = {
-        "name": uname,
-        "cards": {},
-        "topics": {},
-        # ИСПОЛЬЗУЕМ НОВЫЕ КЛЮЧИ:
-        "current_streak": 0,
-        "best_streak": 0,
-        "last_goal_day": None,
-        "last_review": None,
-        "goal_per_day": 10,
-        "done_today": 0,
-        "last_day": today_str(),
-        "total_answered": 0,
-        "tokens": 0,
-        "achievements": [],
-        "nejm": {"queue": [], "answered": 0, "current": None},
-        "practicum": {"index": 0}
-    }
+    kb = types.InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        types.InlineKeyboardButton("Да, сбросить", callback_data="reset:confirm"),
+        types.InlineKeyboardButton("Отмена", callback_data="reset:cancel"),
+    )
+    await message.answer(
+        "Это удалит весь учебный прогресс. Подтвердить сброс?",
+        reply_markup=kb,
+    )
+
+
+@dp.callback_query_handler(lambda c: c.data in {"reset:confirm", "reset:cancel"})
+async def confirm_reset_all(callback_query: types.CallbackQuery):
+    await callback_query.answer()
+    try:
+        await callback_query.message.edit_reply_markup()
+    except Exception:
+        pass
+
+    if callback_query.data == "reset:cancel":
+        await bot.send_message(callback_query.from_user.id, "Сброс отменён.")
+        return
+
+    uid = str(callback_query.from_user.id)
+    uname = callback_query.from_user.first_name or "Без имени"
+    progress.pop(uid, None)
+    ensure_user(uid, uname)
     save_progress(progress)
-    await message.answer("🔄 Полный сброс. Начинай с /start или /train.")
+    await bot.send_message(uid, "🔄 Полный сброс выполнен. Начинай с /start или /train.")
 
 async def send_nejm_case(chat_id: int, *, notify_reset: bool = False):
     uid = str(chat_id)
@@ -778,15 +758,13 @@ async def send_nejm_case(chat_id: int, *, notify_reset: bool = False):
 
     parts = split_text(text, 3500) or [text]
     for i, part in enumerate(parts):
-        if i == 0:
-            await bot.send_message(chat_id, part, reply_markup=kb)
-        else:
-            await bot.send_message(chat_id, part)
+        reply_markup = kb if i == len(parts) - 1 else None
+        await bot.send_message(chat_id, part, reply_markup=reply_markup)
 
     if notify_reset:
         await bot.send_message(
             chat_id,
-            "Ты прошёл все кейсы — последовательность обновлена. ✅"
+            "Ты прошёл все кейсы - последовательность обновлена. ✅"
         )
 
     save_progress(progress)
@@ -799,7 +777,7 @@ async def send_amir_question(chat_id: int, *, notify_reset: bool = False):
 async def send_amir_question_srs(chat_id: int):
     uid = str(chat_id)
     user = ensure_user(uid)
-    cards = user.get("cards", {})
+    cards = user.get("amir_cards", {})
 
     if not amir_questions:
         await bot.send_message(chat_id, "Пока нет вопросов AMIR. Добавь их в amir_ru.json.")
@@ -1039,14 +1017,14 @@ async def handle_amir_answer(callback_query: types.CallbackQuery):
     correct_idx = int(obj.get("correct_index", 0))
     correct = chosen_idx == correct_idx
 
-    cards = user.setdefault("cards", {})
+    cards = user.setdefault("amir_cards", {})
     qid_str = str(question_id)
     card = cards.get(qid_str, {"interval": 1, "next_review": today_str()})
     update_interval(card, correct)
     cards[qid_str] = card
 
     topic = obj.get("topic", "AMIR")
-    tdata = user.setdefault("topics", {}).setdefault(topic, {"correct": 0, "total": 0})
+    tdata = user.setdefault("amir_topics", {}).setdefault(topic, {"correct": 0, "total": 0})
     tdata["total"] += 1
     if correct:
         tdata["correct"] += 1
@@ -1214,16 +1192,5 @@ async def on_startup(_dispatcher):
 
 if __name__ == "__main__":
     print("✅ Бот запущен и ждёт сообщений в Telegram...")
-
-    # Render Web Service health endpoint.
-    try:
-        from server import app
-        port = int(os.getenv("PORT", "10000"))
-        threading.Thread(
-            target=lambda: app.run(host="0.0.0.0", port=port, use_reloader=False),
-            daemon=True,
-        ).start()
-    except Exception:
-        logging.exception("server.py не запущен")
 
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
